@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ormit — Documentation</title>
+  <meta name="description" content="Ormit documentation: getting started, modeling, querying, saving, relationships, migrations, plugins, and the EF Core mapping." />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="index.html"><img class="logo" src="favicon.svg" alt="" /> Ormit</a>
+      <div class="links">
+        <a href="index.html">Home</a>
+        <a href="docs.html">Docs</a>
+        <a href="docs.html#ef-core">From EF Core</a>
+        <a class="gh" href="https://github.com/farajshuaib/ormit">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="docs">
+    <aside class="sidebar">
+      <nav id="toc">
+        <div class="group">Start</div>
+        <a href="#getting-started">Getting started</a>
+        <a href="#modeling">Defining a model</a>
+        <div class="group">Data</div>
+        <a href="#querying">Querying</a>
+        <a href="#saving">Saving &amp; tracking</a>
+        <a href="#relationships">Relationships &amp; loading</a>
+        <div class="group">Operations</div>
+        <a href="#migrations">Migrations</a>
+        <a href="#plugins">Plugins</a>
+        <a href="#dialects">Dialects</a>
+        <div class="group">Reference</div>
+        <a href="#ef-core">From EF Core</a>
+        <a href="#diagnostics">Diagnostics</a>
+        <a href="#packages">Packages</a>
+      </nav>
+    </aside>
+
+    <article class="content">
+      <h1>Documentation</h1>
+      <p class="lead">Ormit is an EF Core–style ORM for TypeScript — <code>DbContext</code>, typed queries, change tracking, and snapshot migrations, on any SQL database.</p>
+
+      <h2 id="getting-started">Getting started <a class="anchor" href="#getting-started">#</a></h2>
+      <p>Install the core plus a dialect. SQLite runs in-process and is perfect for getting started or testing:</p>
+      <pre><code class="language-bash">pnpm add @ormit/core @ormit/sqlite
+# or @ormit/postgres · @ormit/mysql · @ormit/mssql</code></pre>
+      <p>Requires Node.js 18+ and TypeScript 5+ (<code>strict</code> recommended).</p>
+      <p>A minimal end-to-end example:</p>
+      <pre><code class="language-ts">import { DbContext, type DbContextOptions, type ModelBuilder } from '@ormit/core';
+import { SqliteEngine } from '@ormit/sqlite';
+
+class User { id!: number; name!: string; age!: number; }
+
+class AppDb extends DbContext {
+  users = this.set(User);
+  constructor(o: DbContextOptions) { super(o); }
+  protected onModelCreating(m: ModelBuilder) {
+    m.entity(User, e =&gt; e.toTable('users').hasKey('id'));
+  }
+}
+
+const engine = new SqliteEngine(':memory:');
+engine.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INT)`);
+const db = new AppDb({ engine });
+
+const nour = db.users.add(Object.assign(new User(), { name: 'Nour', age: 28 }));
+await db.saveChanges();          // INSERT — nour.id is written back
+
+const adults = await db.users.where(x =&gt; x.age.gte(18)).toList();</code></pre>
+
+      <h2 id="modeling">Defining a model <a class="anchor" href="#modeling">#</a></h2>
+      <p>Entities are plain classes (POCOs). Configure them fluently in <code>onModelCreating</code>. Precedence is <strong>convention &lt; decorator &lt; fluent</strong> — you only configure what conventions can't infer.</p>
+      <pre><code class="language-ts">m.entity(Post, e =&gt; {
+  e.toTable('posts', 'blog');                 // table + optional schema
+  e.hasKey('id');                             // or composite: hasKey('a', 'b')
+  e.property(x =&gt; x.title).hasMaxLength(200).isRequired();
+  e.property(x =&gt; x.body).hasConversion('markdown');
+  e.hasIndex('slug').isUnique();
+  e.hasOne(User, x =&gt; x.author).withMany(u =&gt; u.posts).hasForeignKey('authorId');
+  e.ownsOne(Address, x =&gt; x.address);         // flattened into prefixed columns
+  e.hasQueryFilter(x =&gt; x.deleted.eq(false)); // global filter
+  e.hasData({ id: 1, title: 'Seed' });        // seed row
+});</code></pre>
+      <div class="callout">The model finalizes once per context class into an immutable, JSON-serializable <strong>ModelSnapshot</strong> (sorted keys, byte-stable) that the migrations differ consumes. Invalid models throw eagerly with an actionable <code>OMT12xx</code> code.</div>
+      <p>Prefer decorators? <code>@ormit/decorators</code> replays into the same builder:</p>
+      <pre><code class="language-ts">import { entity, key, column, hasMany, applyDecorators } from '@ormit/decorators';
+
+@entity({ table: 'users' })
+class User {
+  @key() id!: number;
+  @column({ maxLength: 80 }) name!: string;
+  @hasMany(() =&gt; Post, { foreignKey: 'authorId' }) posts!: Post[];
+}
+// inside onModelCreating: applyDecorators(model, [User, Post]);</code></pre>
+
+      <h2 id="querying">Querying <a class="anchor" href="#querying">#</a></h2>
+      <p>Every <code>Queryable</code> is immutable — each call returns a new query. The lambda runs once at build time against a typed Proxy that records an IR.</p>
+      <pre><code class="language-ts">const rows = await db.users
+  .where(x =&gt; x.age.between(18, 65).and(x.email.isNotNull()))
+  .orderByDescending(x =&gt; x.createdAt)
+  .skip(20).take(10)
+  .select(x =&gt; ({ id: x.id, name: x.name.toLower() }))
+  .toList();</code></pre>
+      <h3>Operators</h3>
+      <table>
+        <tr><th>Group</th><th>Operators</th></tr>
+        <tr><td>All</td><td><code>eq</code> <code>neq</code> <code>in</code> <code>isNull</code> <code>isNotNull</code></td></tr>
+        <tr><td>Ordered</td><td><code>gt</code> <code>gte</code> <code>lt</code> <code>lte</code> <code>between</code></td></tr>
+        <tr><td>String</td><td><code>startsWith</code> <code>endsWith</code> <code>contains</code> <code>like</code> <code>toLower</code> <code>toUpper</code></td></tr>
+        <tr><td>To-many nav</td><td><code>any(pred?)</code> <code>all(pred)</code> <code>count()</code> → EXISTS / subquery</td></tr>
+      </table>
+      <h3>Terminals</h3>
+      <p><code>toList</code>, <code>first</code>/<code>firstOrNull</code>, <code>single</code>/<code>singleOrNull</code>, <code>count</code>, <code>any</code>, <code>sum</code>/<code>avg</code>/<code>min</code>/<code>max</code>, <code>toPage(page, size)</code>.</p>
+      <h3>Raw SQL &amp; tracking</h3>
+      <pre><code class="language-ts">// Parameterized — interpolations are always bound, never string-concatenated.
+const found = await db.users.fromSql`SELECT * FROM users WHERE name = ${name}`.toList();
+
+const readonly = await db.users.asNoTracking().toList();     // skip identity map
+const all = await db.users.ignoreQueryFilters().toList();    // bypass global filters</code></pre>
+
+      <h2 id="saving">Saving &amp; change tracking <a class="anchor" href="#saving">#</a></h2>
+      <p>Track entities with <code>add</code>/<code>attach</code>/<code>remove</code>, then persist atomically. Ormit diffs snapshots to find changes, topo-sorts by the FK graph (parents before children on insert, the reverse on delete), and writes generated keys back.</p>
+      <pre><code class="language-ts">const user = await db.users.find(1);   // identity map first, then a keyed query
+user!.name = 'Renamed';                // tracked — only changed columns update
+db.users.remove(other);
+const affected = await db.saveChanges();
+
+// Ambient transaction spanning multiple saves:
+await db.database.transaction(async () =&gt; {
+  db.orders.add(order);
+  await db.saveChanges();
+});</code></pre>
+      <div class="callout">Mark a property <code>.isConcurrencyToken()</code> (e.g. a <code>version</code> or rowversion). If a tracked update or delete matches zero rows, <code>saveChanges()</code> throws <strong><code>ConcurrencyError</code></strong>.</div>
+      <p>Contexts are short-lived and per-request. <code>createContextFactory()</code> pools and resets them; <code>@ormit/adapters</code> wires that into Express, Fastify, and NestJS.</p>
+
+      <h2 id="relationships">Relationships &amp; loading <a class="anchor" href="#relationships">#</a></h2>
+      <p>Configure 1:1, 1:N, and N:M with <code>hasOne</code>/<code>hasMany</code>. Load related data eagerly, explicitly, or lazily.</p>
+      <pre><code class="language-ts">// Eager — split queries by default (no cartesian explosion).
+const blogs = await db.blogs
+  .include(x =&gt; x.posts)
+  .thenInclude((p: Post) =&gt; p.comments)
+  .toList();
+
+// Explicit — load on demand.
+await db.entry(post).reference('author').load();
+await db.entry(blog).collection('posts').load();
+
+// Lazy — opt-in, always awaited (no hidden sync getters).
+const author = await db.lazyReference&lt;User&gt;(post, 'author').load();</code></pre>
+      <div class="callout">In diagnostics mode Ormit's <strong>N+1 detector</strong> flags repeated single-entity loads of the same type (code <code>OMT2001</code>) and points you at <code>Include</code>.</div>
+
+      <h2 id="migrations">Migrations <a class="anchor" href="#migrations">#</a></h2>
+      <p>Migrations come from diffing your model snapshot against the last committed one — never from introspecting the live database. That keeps them deterministic and mergeable.</p>
+      <pre><code class="language-ts">import { diffWithDown, EMPTY_SNAPSHOT, snapshotData, Migrator } from '@ormit/migrations';
+
+const { up, down } = diffWithDown(EMPTY_SNAPSHOT, snapshotData(model));
+const migrator = new Migrator(engine, [{ id: '0001_init', up, down }]);
+
+await migrator.up();      // apply pending — idempotent, safe to run twice
+await migrator.down(1);   // revert the last migration</code></pre>
+      <p>The <code>@ormit/cli</code> facade backs the intended <code>ormit</code> verbs:</p>
+      <pre><code class="language-bash">ormit migrations add "init"     # diff → migration file + snapshot to commit
+ormit database update           # apply pending (idempotent)
+ormit database update --down 1  # revert
+ormit migrations repair         # re-derive the snapshot after a merge conflict</code></pre>
+
+      <h2 id="plugins">Plugins <a class="anchor" href="#plugins">#</a></h2>
+      <p>Register plugins on the context. The first-party plugins are built solely on the public <code>OrmPlugin</code> surface — <code>configureModel</code>, <code>normalizerPasses</code>, and lifecycle <code>interceptors</code> — so your own plugins have the same power.</p>
+      <pre><code class="language-ts">import { softDelete, timestamps, multitenancy } from '@ormit/plugins';
+
+const db = new AppDb({
+  engine,
+  plugins: [
+    softDelete(),                                    // remove() → UPDATE isDeleted + global filter
+    timestamps(),                                    // stamp createdAt / updatedAt on save
+    multitenancy({ tenant: () =&gt; als.getStore()! }), // scope every read + stamp inserts
+  ],
+});</code></pre>
+
+      <h2 id="dialects">Dialects <a class="anchor" href="#dialects">#</a></h2>
+      <table>
+        <tr><th>Package</th><th>Driver</th><th>Notes</th></tr>
+        <tr><td><code>@ormit/sqlite</code></td><td>better-sqlite3</td><td>RETURNING · in-process</td></tr>
+        <tr><td><code>@ormit/postgres</code></td><td>pg</td><td>RETURNING · ILIKE · LIMIT/OFFSET</td></tr>
+        <tr><td><code>@ormit/mysql</code></td><td>mysql2</td><td>insertId key write-back · implicit DDL commit</td></tr>
+        <tr><td><code>@ormit/mssql</code></td><td>mssql (tedious)</td><td>OUTPUT INSERTED.* · TOP / OFFSET…FETCH</td></tr>
+      </table>
+      <p>A dialect "supports" Ormit iff it passes the behavioral compatibility suite unmodified. All four do, verified against real servers via Testcontainers.</p>
+
+      <h2 id="ef-core">Coming from EF Core <a class="anchor" href="#ef-core">#</a></h2>
+      <table>
+        <tr><th>EF Core</th><th>Ormit</th></tr>
+        <tr><td><code>DbContext</code> / <code>DbSet&lt;T&gt;</code></td><td><code>DbContext</code> / <code>DbSet&lt;T&gt;</code></td></tr>
+        <tr><td><code>OnModelCreating</code></td><td><code>onModelCreating(model)</code></td></tr>
+        <tr><td><code>.HasKey(x =&gt; x.Id)</code></td><td><code>.hasKey('id')</code></td></tr>
+        <tr><td><code>.Property(x =&gt; x.Name).HasMaxLength(80)</code></td><td><code>.property(x =&gt; x.name).hasMaxLength(80)</code></td></tr>
+        <tr><td><code>.HasOne(...).WithMany(...)</code></td><td><code>.hasOne(T, x =&gt; x.nav).withMany(...)</code></td></tr>
+        <tr><td><code>Where(x =&gt; x.Age &gt; 18)</code></td><td><code>.where(x =&gt; x.age.gt(18))</code></td></tr>
+        <tr><td><code>Include(...).ThenInclude(...)</code></td><td><code>.include(...).thenInclude(...)</code></td></tr>
+        <tr><td><code>FromSqlInterpolated($"…{p}")</code></td><td><code>.fromSql`…${p}`</code></td></tr>
+        <tr><td><code>AsNoTracking()</code></td><td><code>.asNoTracking()</code></td></tr>
+        <tr><td><code>SaveChanges()</code></td><td><code>await saveChanges()</code></td></tr>
+      </table>
+      <p><strong>Key differences:</strong> everything is async; there are no lazy proxies by default (use <code>Include</code>, explicit loading, or opt-in <code>LazyRef</code>); collection includes are split queries.</p>
+
+      <h2 id="diagnostics">Diagnostics <a class="anchor" href="#diagnostics">#</a></h2>
+      <p>Errors carry stable codes. Model validation runs eagerly and reports every problem at once.</p>
+      <table>
+        <tr><th>Code</th><th>Meaning</th></tr>
+        <tr><td><code>OMT1001</code></td><td>Expression could not be translated (thrown at build time)</td></tr>
+        <tr><td><code>OMT1003</code></td><td>Concurrency conflict (<code>ConcurrencyError</code>)</td></tr>
+        <tr><td><code>OMT12xx</code></td><td>Model validation (no key, duplicate table, bad FK, …)</td></tr>
+        <tr><td><code>OMT2001</code></td><td>Possible N+1 (diagnostics mode)</td></tr>
+      </table>
+      <p>The full catalog lives in <a href="https://github.com/farajshuaib/ormit/blob/main/docs/diagnostics.md">docs/diagnostics.md</a>.</p>
+
+      <h2 id="packages">Packages <a class="anchor" href="#packages">#</a></h2>
+      <table>
+        <tr><th>Package</th><th>Purpose</th></tr>
+        <tr><td><code>@ormit/core</code></td><td>IR, recorder, Queryable + pipeline, DbContext/DbSet, tracking, metadata, contracts</td></tr>
+        <tr><td><code>@ormit/engine-kysely</code></td><td>Lowers IR onto Kysely; SQL + DDL for all four dialects</td></tr>
+        <tr><td><code>@ormit/sqlite · postgres · mysql · mssql</code></td><td>Dialect executors</td></tr>
+        <tr><td><code>@ormit/plugins</code></td><td>soft-delete, timestamps, multitenancy</td></tr>
+        <tr><td><code>@ormit/migrations · cli</code></td><td>Differ, emitter, runner, repair; command facade</td></tr>
+        <tr><td><code>@ormit/decorators · adapters</code></td><td>Decorator model API; Express/Fastify/NestJS glue</td></tr>
+        <tr><td><code>@ormit/testing</code></td><td>In-memory engine with real query semantics</td></tr>
+      </table>
+
+      <div class="band" style="margin-top:48px">
+        <h2 style="font-size:1.5rem">Ready to build?</h2>
+        <p>Grab the core and a dialect, and go.</p>
+        <a class="btn btn-primary" href="#getting-started">Back to getting started ↑</a>
+      </div>
+    </article>
+  </div>
+
+  <footer>
+    <div class="wrap">
+      <a class="brand" href="index.html"><img class="logo" src="favicon.svg" alt="" /> Ormit</a>
+      <span class="muted" style="font-size:.86rem">MIT Licensed · Built on Kysely</span>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+  <script>
+    // Scroll-spy: highlight the current section in the sidebar.
+    const links = [...document.querySelectorAll('#toc a')];
+    const map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          links.forEach(a => a.classList.remove('active'));
+          map.get(e.target.id)?.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-80px 0px -70% 0px' });
+    document.querySelectorAll('.content h2[id]').forEach(h => obs.observe(h));
+  </script>
+</body>
+</html>

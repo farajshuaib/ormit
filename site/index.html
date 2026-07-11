@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ormit — an EF Core–style ORM for TypeScript</title>
+  <meta name="description" content="DbContext, DbSet, typed LINQ-like queries, change tracking, and migrations for Node.js on any SQL database. Kysely under the hood, never in your face." />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" />
+  <meta property="og:title" content="Ormit — an EF Core–style ORM for TypeScript" />
+  <meta property="og:description" content="Typed queries, change tracking, and migrations on any SQL database." />
+  <meta property="og:type" content="website" />
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="index.html">
+        <img class="logo" src="favicon.svg" alt="" /> Ormit
+      </a>
+      <div class="links">
+        <a href="docs.html">Docs</a>
+        <a href="docs.html#querying">Querying</a>
+        <a href="docs.html#migrations">Migrations</a>
+        <a href="docs.html#ef-core">From EF Core</a>
+        <a class="gh" href="https://github.com/farajshuaib/ormit">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">● 1.0-rc · SQLite · Postgres · MySQL · SQL Server</span>
+        <h1>The ORM that reads like <span class="grad">EF Core</span>, for TypeScript.</h1>
+        <p class="lead"><code>DbContext</code>, typed queries, change tracking, and migrations — on any SQL database.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="docs.html#getting-started">Get started →</a>
+          <a class="btn btn-ghost" href="https://github.com/farajshuaib/ormit">View on GitHub</a>
+        </div>
+        <div class="install">
+          <span class="dollar">$</span>
+          <span id="install-cmd">pnpm add @ormit/core @ormit/sqlite</span>
+          <button class="copy" onclick="copyInstall(this)" aria-label="Copy">⧉</button>
+        </div>
+      </div>
+
+      <div class="window" aria-hidden="false">
+        <div class="bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="name">app.ts</span>
+        </div>
+        <pre><code class="language-ts">const adults = await db.users
+  .where(x =&gt; x.age.gt(18).and(x.name.startsWith('A')))
+  .include(x =&gt; x.posts)
+  .orderBy(x =&gt; x.name)
+  .take(10)
+  .toList();
+
+db.users.add(new User({ name: 'Nour', age: 28 }));
+await db.saveChanges(); // atomic · key write-back</code></pre>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Everything you expect from a real ORM</h2>
+          <p>Typed to the core, honest about SQL, and portable across four dialects.</p>
+        </div>
+        <div class="features">
+          <div class="card">
+            <div class="ic">◇</div>
+            <h3>Typed, safe queries</h3>
+            <p>A Proxy expression recorder captures <code>x.age.gt(18)</code> into an IR — no <code>toString()</code> parsing, minification-safe. Illegal operators don't compile.</p>
+          </div>
+          <div class="card">
+            <div class="ic">⟳</div>
+            <h3>Change tracking &amp; UoW</h3>
+            <p>A snapshot-diffing identity map, atomic <code>saveChanges()</code> with FK ordering, optimistic concurrency, and ambient transactions.</p>
+          </div>
+          <div class="card">
+            <div class="ic">⇄</div>
+            <h3>Relationships &amp; loading</h3>
+            <p><code>Include</code>/<code>ThenInclude</code> as split queries (no cartesian explosion), plus explicit and opt-in lazy loading.</p>
+          </div>
+          <div class="card">
+            <div class="ic">△</div>
+            <h3>Snapshot migrations</h3>
+            <p>A differ compares your model to the last committed snapshot — never the live DB — and emits reversible, mergeable migrations.</p>
+          </div>
+          <div class="card">
+            <div class="ic">◈</div>
+            <h3>Plugins</h3>
+            <p>Soft-delete, timestamps, and multitenancy ship first-party, built entirely on the same public plugin surface you'd use.</p>
+          </div>
+          <div class="card">
+            <div class="ic">⚡</div>
+            <h3>Kysely engine, hidden</h3>
+            <p>Deterministic, parameterized SQL per dialect. The engine is a swappable seam — it never leaks into your types.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section style="padding-top:0">
+      <div class="wrap split">
+        <div>
+          <h3>Write LINQ, get SQL</h3>
+          <p>Compose immutable queries with a fluent, fully-typed API. Every operator maps to real SQL; anything untranslatable throws at build time, never silently.</p>
+          <ul>
+            <li><strong>Operators</strong> — eq/in/between, startsWith/contains/like, any/all/count on collections.</li>
+            <li><strong>Terminals</strong> — toList, first, single, count, sum/avg/min/max, toPage.</li>
+            <li><strong>Escape hatch</strong> — parameterized <code>fromSql</code> tagged templates.</li>
+          </ul>
+        </div>
+        <div class="window">
+          <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="name">query.ts</span></div>
+          <pre><code class="language-ts">const page = await db.orders
+  .where(x =&gt; x.total.gte(100))
+  .where(x =&gt; x.items.any(i =&gt; i.sku.eq('A1')))
+  .orderByDescending(x =&gt; x.createdAt)
+  .select(x =&gt; ({ id: x.id, total: x.total }))
+  .toPage(1, 20);</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section style="padding-top:0">
+      <div class="wrap split alt">
+        <div>
+          <h3>Save like a Unit of Work</h3>
+          <p>Track POCO entities, mutate them, and persist in one atomic call. Ormit detects changes, orders inserts and deletes by the FK graph, writes generated keys back, and enforces concurrency tokens.</p>
+          <ul>
+            <li><strong>Identity map</strong> — <code>find()</code> and query results dedupe to one instance.</li>
+            <li><strong>Concurrency</strong> — a stale update throws <code>ConcurrencyError</code>.</li>
+            <li><strong>Transactions</strong> — <code>database.transaction()</code> is ambient (AsyncLocalStorage).</li>
+          </ul>
+        </div>
+        <div class="window">
+          <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="name">save.ts</span></div>
+          <pre><code class="language-ts">const user = await db.users.find(1);
+user.name = 'Renamed';       // only changed columns update
+db.users.remove(oldPost);
+
+await db.database.transaction(async () =&gt; {
+  db.orders.add(order);
+  await db.saveChanges();      // atomic + FK-ordered
+});</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="dialects" style="padding-top:0">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>One behavior, four databases</h2>
+          <p>Each dialect passes the same compatibility suite against a real server.</p>
+        </div>
+        <div class="dialects">
+          <div class="dialect"><div class="name">SQLite</div><div class="meta">better-sqlite3</div><div class="check">✓ compatibility suite</div></div>
+          <div class="dialect"><div class="name">PostgreSQL</div><div class="meta">pg · RETURNING</div><div class="check">✓ compatibility suite</div></div>
+          <div class="dialect"><div class="name">MySQL</div><div class="meta">mysql2 · insertId</div><div class="check">✓ compatibility suite</div></div>
+          <div class="dialect"><div class="name">SQL Server</div><div class="meta">mssql · OUTPUT</div><div class="check">✓ compatibility suite</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section style="padding-top:0">
+      <div class="wrap">
+        <div class="band">
+          <h2>Coming from EF Core?</h2>
+          <p>The mental model carries over — <code>DbContext</code>, <code>DbSet</code>, <code>Include</code>, <code>SaveChanges</code>. See the side-by-side mapping.</p>
+          <a class="btn btn-primary" href="docs.html#ef-core">Read the migration guide →</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <a class="brand" href="index.html"><img class="logo" src="favicon.svg" alt="" /> Ormit</a>
+      <div class="cols">
+        <a href="docs.html#getting-started">Getting started</a>
+        <a href="docs.html#querying">Querying</a>
+        <a href="docs.html#saving">Saving</a>
+        <a href="docs.html#migrations">Migrations</a>
+        <a href="docs.html#plugins">Plugins</a>
+        <a href="https://github.com/farajshuaib/ormit">GitHub</a>
+      </div>
+      <span class="muted" style="font-size:.86rem">MIT Licensed</span>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+  <script>
+    function copyInstall(btn) {
+      navigator.clipboard.writeText(document.getElementById('install-cmd').textContent).then(() => {
+        const t = btn.textContent; btn.textContent = '✓'; setTimeout(() => (btn.textContent = t), 1200);
+      });
+    }
+  </script>
+</body>
+</html>

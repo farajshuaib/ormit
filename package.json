@@ -3,18 +3,23 @@
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "scripts": {
-    "build": "tsc -b packages/core packages/testing packages/engine-kysely packages/dialect-sqlite packages/plugins packages/migrations packages/cli packages/decorators packages/dialect-postgres packages/dialect-mysql",
+    "build": "tsc -b packages/core packages/testing packages/engine-kysely packages/dialect-sqlite packages/plugins packages/migrations packages/cli packages/decorators packages/dialect-postgres packages/dialect-mysql packages/dialect-mssql packages/adapters",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:types": "tsc -p packages/core/test-d/tsconfig.json",
     "typecheck": "tsc -b --dry || tsc -b",
     "check:deps": "node scripts/check-deps.mjs",
     "perf:compile": "node scripts/compile-perf.mjs",
-    "test:containers": "ORMIT_TESTCONTAINERS=1 vitest run packages/dialect-postgres packages/dialect-mysql",
+    "bench": "node scripts/bench.mjs",
+    "test:containers": "ORMIT_TESTCONTAINERS=1 vitest run packages/dialect-postgres packages/dialect-mysql packages/dialect-mssql",
     "gate": "pnpm build && pnpm check:deps && pnpm test:types && pnpm test:coverage",
-    "gate:rc": "pnpm gate && pnpm perf:compile"
+    "gate:rc": "pnpm gate && pnpm perf:compile",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2",
     "@types/node": "^22",
     "@vitest/coverage-v8": "2.1.9",
     "esbuild": "0.21.5",

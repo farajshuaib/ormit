@@ -74,18 +74,28 @@ describe('SQL features · dialect deltas (4-dialect matrix)', () => {
     );
   });
 
-  it('mssql uses @n placeholders and OFFSET…ROWS paging', () => {
+  it('mssql uses @n placeholders and OFFSET…FETCH paging (never LIMIT)', () => {
     const sql = mssql.compileSelect(query, ctx).sql;
     expect(sql).toContain('@1'); // named placeholders, not $1 / ?
     expect(sql).not.toContain('$1');
+    expect(sql).not.toContain('limit'); // SQL Server has no LIMIT
     expect(sql).toContain('offset');
-    expect(sql).toContain('rows');
+    expect(sql).toContain('fetch next');
+  });
+
+  it('mssql take-only uses TOP and insert uses OUTPUT INSERTED.*', () => {
+    const top = mssql.compileSelect({ ...base, take: 1 }, ctx).sql;
+    expect(top).toContain('top(1)');
+    const ins = mssql.compileWrite({ kind: 'insert', entity: 'User', values: { name: 'A' } }, ctx).sql;
+    expect(ins).toContain('output "inserted".*');
   });
 
   it('all four dialects parameterize constants (no inlining)', () => {
+    // Every constant (predicate 18, take 10, skip 20) is bound, not inlined.
+    // Order varies by dialect (MSSQL emits OFFSET before FETCH), so compare sets.
     for (const gen of [pg, sqlite, mysql, mssql]) {
       const cmd = gen.compileSelect(query, ctx);
-      expect(cmd.params).toEqual([18, 10, 20]);
+      expect([...cmd.params].sort((a, b) => Number(a) - Number(b))).toEqual([10, 18, 20]);
     }
   });
 });

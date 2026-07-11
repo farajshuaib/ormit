@@ -3,9 +3,9 @@
 > `DbContext`, `DbSet`, typed LINQ-like queries, change tracking, and migrations —
 > for Node.js, on any SQL database. Kysely under the hood, never in your face.
 
-**Status: approaching 1.0-rc — Phases 0–9 implemented (SQLite end-to-end; the
-Postgres/MySQL/MSSQL executors and CI compatibility matrix are the remaining gate).**
-See `docs/implementation-plan.md` for the full roadmap.
+**Status: 1.0-rc candidate — Phases 0–9 implemented; all four dialects (SQLite,
+Postgres, MySQL, SQL Server) pass the behavioral compatibility suite against real
+servers via Testcontainers.** See `docs/implementation-plan.md` for the full roadmap.
 
 ```ts
 class AppDb extends DbContext {
@@ -30,14 +30,16 @@ await db.saveChanges();
 | Package | Purpose |
 |---|---|
 | `@ormit/core` | IR, expression recorder, Queryable + pipeline (normalizer/optimizer/cache), DbContext/DbSet, change tracking (identity map + UoW), metadata (ModelBuilder + conventions + ModelSnapshot), engine contracts. Zero deps. |
-| `@ormit/engine-kysely` | Lowers IR onto Kysely; per-dialect SQL compilation (PG + SQLite so far). |
+| `@ormit/engine-kysely` | Lowers IR onto Kysely; SQL compilation for all four dialects (PG, SQLite, MySQL, MSSQL). |
 | `@ormit/sqlite` | SQLite dialect: Kysely `sqlite` generator + a better-sqlite3 executor (real execution). |
 | `@ormit/postgres` | PostgreSQL dialect: Kysely `postgres` generator + a node-postgres executor (RETURNING, connection-affine transactions). |
 | `@ormit/mysql` | MySQL dialect: Kysely `mysql` generator + a mysql2 executor (`insertId` key write-back; implicit DDL commit). |
+| `@ormit/mssql` | SQL Server dialect: Kysely `mssql` generator + a node-mssql executor (OUTPUT INSERTED.*, TOP / OFFSET…FETCH). |
 | `@ormit/plugins` | First-party plugins (soft-delete, timestamps, multitenancy) — built only on the public plugin surface. |
 | `@ormit/migrations` | Model differ (snapshot vs snapshot), TS migration emitter, runner with history, snapshot repair. |
 | `@ormit/cli` | Command facade behind the `ormit` binary (migrations add/list, database update, script, repair). |
 | `@ormit/decorators` | `@entity/@key/@column/@hasOne/@hasMany` decorators that replay into the ModelBuilder. |
+| `@ormit/adapters` | Thin per-request DI/lifecycle glue for Express, Fastify, and NestJS (frameworks typed structurally — zero framework deps). |
 | `@ormit/testing` | In-memory engine with real query semantics — unit tests need no database. |
 
 ## Development
@@ -45,11 +47,11 @@ await db.saveChanges();
 ```bash
 pnpm install
 pnpm build          # tsc -b, project references
-pnpm test           # vitest (194 tests, incl. real SQLite + property round-trip)
+pnpm test           # vitest (195 offline tests; PG/MySQL/MSSQL suites skip without Docker)
 pnpm test:types     # tsd-style compile-time rejection of illegal operators
 pnpm test:coverage  # + conventions branch-coverage gate (100%)
 pnpm perf:compile   # compile-time perf gate (50-entity model typechecks < 3s)
-pnpm test:containers # PG + MySQL compatibility suites on real servers (needs Docker)
+pnpm test:containers # PG + MySQL + MSSQL compatibility suites on real servers (needs Docker)
 pnpm gate           # build + deps + type tests + coverage
 pnpm gate:rc        # gate + compile-perf (release-candidate gate)
 ```
@@ -121,15 +123,26 @@ pnpm gate:rc        # gate + compile-perf (release-candidate gate)
   3s); MIT `LICENSE`, `SECURITY.md`, and a [guide](docs/guide.md) with a "Coming from
   EF Core" table.
 
-- **Real-database dialects:** `@ormit/postgres` (node-postgres) and `@ormit/mysql`
-  (mysql2) run the behavioral compatibility suite — CRUD, global query filters,
-  aggregates, optimistic concurrency, transaction rollback — against **real servers via
-  Testcontainers** (`pnpm test:containers`; gated behind `ORMIT_TESTCONTAINERS` so the
-  default gate stays offline). MySQL exercises the no-`RETURNING`/`insertId` path.
+- **Real-database dialects (all four):** `@ormit/postgres` (node-postgres),
+  `@ormit/mysql` (mysql2), and `@ormit/mssql` (node-mssql) each run the behavioral
+  compatibility suite — CRUD, global query filters, aggregates, paging, optimistic
+  concurrency, transaction rollback — against **real servers via Testcontainers**
+  (`pnpm test:containers`; gated behind `ORMIT_TESTCONTAINERS` so the default gate stays
+  offline). Verified green on `postgres:16`, `mysql:8`, and `mssql/server:2022`. Each
+  exercises its dialect's key-return path (RETURNING / `insertId` / `OUTPUT INSERTED.*`)
+  and paging (`LIMIT/OFFSET` vs `TOP` / `OFFSET…FETCH`).
+- **Framework adapters:** `@ormit/adapters` provides per-request context lifecycle glue —
+  Express middleware, a Fastify plugin, and NestJS providers (REQUEST-scoped) — typed
+  structurally so no framework is a dependency; each creates a pooled context per request
+  and disposes it when the response ends.
+- **CI, benchmarks & release:** GitHub Actions runs the offline gate on every push and,
+  nightly, the four-dialect Testcontainers matrix plus a **throughput regression gate**
+  (`pnpm bench`: Ormit's rows/sec *ratio vs the raw better-sqlite3 driver*, ±10% band —
+  machine-independent). A Changesets workflow publishes under `@ormit` with **npm
+  provenance**. Packages ship `dist` only (verified via `npm pack --dry-run`).
 
 ## Remaining for 1.0 (per plan)
 
-The MSSQL executor package (tedious) behind Testcontainers — its SQL is generated and
-snapshot-tested today; the four-dialect matrix wired into CI merge-queue/nightly;
-NestJS/Fastify adapters; cross-ORM benchmark publication with the ±10% CI regression
-gate; and the two external pilot sign-offs on the rc checklist.
+Cross-ORM benchmark *publication* (vs Prisma/TypeORM/Drizzle/MikroORM on a dedicated
+runner — the ±10% gate and raw-driver overhead harness exist today), and the two external
+pilot sign-offs on the rc checklist.

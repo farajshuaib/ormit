@@ -18,6 +18,8 @@ export default defineConfig({
       '@ormit/decorators': src('./packages/decorators/src/index.ts'),
       '@ormit/postgres': src('./packages/dialect-postgres/src/index.ts'),
       '@ormit/mysql': src('./packages/dialect-mysql/src/index.ts'),
+      '@ormit/mssql': src('./packages/dialect-mssql/src/index.ts'),
+      '@ormit/adapters': src('./packages/adapters/src/index.ts'),
     },
   },
   test: {

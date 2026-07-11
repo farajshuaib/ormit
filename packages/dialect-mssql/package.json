@@ -1,5 +1,5 @@
 {
-  "name": "@ormit/postgres",
+  "name": "@ormit/mssql",
   "version": "0.0.1",
   "type": "module",
   "main": "dist/index.js",
@@ -14,11 +14,11 @@
   "dependencies": {
     "@ormit/core": "workspace:*",
     "@ormit/engine-kysely": "workspace:*",
-    "pg": "^8.12.0"
+    "mssql": "^11.0.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.0",
-    "@testcontainers/postgresql": "^10.13.0"
+    "@testcontainers/mssqlserver": "^10.13.0",
+    "@types/mssql": "^9"
   },
   "license": "MIT",
   "files": [
@@ -27,6 +27,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/farajshuaib/ormit.git",
-    "directory": "packages/dialect-postgres"
+    "directory": "packages/dialect-mssql"
   }
 }

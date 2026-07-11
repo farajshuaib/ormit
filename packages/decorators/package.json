@@ -4,7 +4,23 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "sideEffects": false,
-  "dependencies": { "@ormit/core": "workspace:*" }
+  "dependencies": {
+    "@ormit/core": "workspace:*"
+  },
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farajshuaib/ormit.git",
+    "directory": "packages/decorators"
+  }
 }

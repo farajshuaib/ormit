@@ -182,19 +182,43 @@ function lower(node: BoolExprNode, eb: AnyEb): any {
   }
 }
 
-/** Dialects whose INSERT supports a `RETURNING` clause. */
-const RETURNING_DIALECTS = new Set<SupportedDialect>(['postgres', 'sqlite']);
+/** How each dialect returns generated keys from an INSERT. */
+type InsertReturn = 'returning' | 'output' | 'none';
+const INSERT_RETURN: Record<SupportedDialect, InsertReturn> = {
+  postgres: 'returning', // INSERT … RETURNING *
+  sqlite: 'returning',
+  mssql: 'output', // INSERT … OUTPUT INSERTED.*
+  mysql: 'none', // read insertId from the driver result
+};
 
 export class KyselySqlGenerator implements ISqlGenerator {
   private readonly db: AnyKysely;
-  private readonly supportsReturning: boolean;
+  private readonly insertReturn: InsertReturn;
   constructor(private readonly dialect: SupportedDialect = 'postgres') {
     this.db = compileOnlyKysely(dialect);
-    this.supportsReturning = RETURNING_DIALECTS.has(dialect);
+    this.insertReturn = INSERT_RETURN[dialect];
   }
 
   private toCommand(compiled: CompiledQuery, hash: string): CompiledCommand {
     return { sql: compiled.sql, params: compiled.parameters, irHash: hash };
+  }
+
+  /** Apply take/skip using each dialect's paging syntax. SQL Server has no
+   * LIMIT — it uses TOP (take-only) or OFFSET…FETCH (which requires ORDER BY). */
+  private applyPaging(sel: any, query: SelectExpr): any {
+    if (this.dialect === 'mssql') {
+      if (query.skip !== undefined) {
+        if (query.orderings.length === 0) sel = sel.orderBy(sql`(select null)`);
+        sel = sel.offset(query.skip);
+        if (query.take !== undefined) sel = sel.fetch(query.take);
+      } else if (query.take !== undefined) {
+        sel = sel.top(query.take);
+      }
+      return sel;
+    }
+    if (query.take !== undefined) sel = sel.limit(query.take);
+    if (query.skip !== undefined) sel = sel.offset(query.skip);
+    return sel;
   }
 
   private table(entity: string, ctx: GenContext): string {
@@ -218,8 +242,7 @@ export class KyselySqlGenerator implements ISqlGenerator {
     // Aggregates collapse the result set; ordering/paging over them is moot.
     if (!query.aggregate) {
       for (const o of query.orderings) sel = sel.orderBy(pathToRef(o.path), o.direction);
-      if (query.take !== undefined) sel = sel.limit(query.take);
-      if (query.skip !== undefined) sel = sel.offset(query.skip);
+      sel = this.applyPaging(sel, query);
     }
 
     return this.toCommand(sel.compile(), irHash(query));
@@ -287,9 +310,10 @@ export class KyselySqlGenerator implements ISqlGenerator {
     switch (op.kind) {
       case 'insert': {
         let q: any = this.db.insertInto(table).values(op.values);
-        // MySQL/MSSQL have no INSERT … RETURNING; their executors read the
-        // generated key from the driver result instead.
-        if (this.supportsReturning) q = q.returningAll();
+        // Postgres/SQLite use RETURNING *, SQL Server uses OUTPUT INSERTED.*,
+        // MySQL has neither (its executor reads insertId from the result).
+        if (this.insertReturn === 'returning') q = q.returningAll();
+        else if (this.insertReturn === 'output') q = q.outputAll('inserted');
         return this.toCommand(q.compile(), irHash(op));
       }
       case 'update': {

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 3 * * *' # nightly: run the real-database compatibility matrix
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Offline gate — runs on every push/PR (no Docker needed).
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm check:deps
+      - run: pnpm test:types
+      - run: pnpm test:coverage
+      - run: pnpm perf:compile
+
+  # Four-dialect behavioral compatibility suite against real servers via
+  # Testcontainers. Nightly / on-demand only — it pulls large DB images.
+  compatibility:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # Postgres, MySQL, and SQL Server suites (SQLite runs in-process in `gate`).
+      - run: pnpm test:containers
+        env:
+          ORMIT_TESTCONTAINERS: '1'
+      # Throughput regression gate (±10% vs the committed baseline).
+      - run: pnpm bench
+        env:
+          BENCH_GATE: '1'

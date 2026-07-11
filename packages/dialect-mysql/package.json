@@ -4,7 +4,12 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "sideEffects": false,
   "dependencies": {
     "@ormit/core": "workspace:*",
@@ -13,5 +18,14 @@
   },
   "devDependencies": {
     "@testcontainers/mysql": "^10.13.0"
+  },
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farajshuaib/ormit.git",
+    "directory": "packages/dialect-mysql"
   }
 }

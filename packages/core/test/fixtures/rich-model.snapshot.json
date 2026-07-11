@@ -1,0 +1,415 @@
+{
+  "entities": [
+    {
+      "discriminator": null,
+      "indexes": [],
+      "key": [],
+      "name": "Address",
+      "navigations": [],
+      "owned": true,
+      "properties": [
+        {
+          "column": "address_city",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 80,
+          "name": "city",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "address_zip",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 10,
+          "name": "zip",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        }
+      ],
+      "queryFilter": null,
+      "schema": "app",
+      "seedData": [],
+      "table": "users"
+    },
+    {
+      "discriminator": null,
+      "indexes": [],
+      "key": [
+        "id"
+      ],
+      "name": "Comment",
+      "navigations": [],
+      "owned": false,
+      "properties": [
+        {
+          "column": "id",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "id",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "onAdd"
+        },
+        {
+          "column": "postId",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "postId",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "never"
+        }
+      ],
+      "queryFilter": null,
+      "schema": null,
+      "seedData": [],
+      "table": "Comments"
+    },
+    {
+      "discriminator": null,
+      "indexes": [],
+      "key": [
+        "orderId",
+        "lineNo"
+      ],
+      "name": "OrderLineItem",
+      "navigations": [],
+      "owned": false,
+      "properties": [
+        {
+          "column": "lineNo",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "lineNo",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "orderId",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "orderId",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "sku",
+          "comment": null,
+          "concurrencyToken": true,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 32,
+          "name": "sku",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        }
+      ],
+      "queryFilter": null,
+      "schema": null,
+      "seedData": [],
+      "table": "order_line_items"
+    },
+    {
+      "discriminator": null,
+      "indexes": [],
+      "key": [
+        "id"
+      ],
+      "name": "Post",
+      "navigations": [
+        {
+          "collection": false,
+          "deleteBehavior": "cascade",
+          "foreignKey": [
+            "authorId"
+          ],
+          "inverse": "posts",
+          "joinEntity": null,
+          "name": "author",
+          "owned": false,
+          "principalKey": [
+            "id"
+          ],
+          "target": "User"
+        },
+        {
+          "collection": true,
+          "deleteBehavior": "cascade",
+          "foreignKey": [
+            "postId"
+          ],
+          "inverse": null,
+          "joinEntity": null,
+          "name": "comments",
+          "owned": false,
+          "principalKey": [
+            "id"
+          ],
+          "target": "Comment"
+        }
+      ],
+      "owned": false,
+      "properties": [
+        {
+          "column": "authorId",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "authorId",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "body",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": "markdown",
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "body",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "id",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "id",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "onAdd"
+        },
+        {
+          "column": "title",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 200,
+          "name": "title",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        }
+      ],
+      "queryFilter": {
+        "kind": "nullcheck",
+        "negated": true,
+        "target": {
+          "kind": "column",
+          "path": [
+            "title"
+          ]
+        }
+      },
+      "schema": null,
+      "seedData": [],
+      "table": "Posts"
+    },
+    {
+      "discriminator": null,
+      "indexes": [],
+      "key": [
+        "id"
+      ],
+      "name": "Role",
+      "navigations": [
+        {
+          "collection": true,
+          "deleteBehavior": "cascade",
+          "foreignKey": [],
+          "inverse": "roles",
+          "joinEntity": null,
+          "name": "users",
+          "owned": false,
+          "principalKey": [
+            "id"
+          ],
+          "target": "User"
+        }
+      ],
+      "owned": false,
+      "properties": [
+        {
+          "column": "id",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "id",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "onAdd"
+        }
+      ],
+      "queryFilter": null,
+      "schema": null,
+      "seedData": [],
+      "table": "Roles"
+    },
+    {
+      "discriminator": null,
+      "indexes": [
+        {
+          "name": "IX_users_email",
+          "properties": [
+            "email"
+          ],
+          "unique": true
+        }
+      ],
+      "key": [
+        "id"
+      ],
+      "name": "User",
+      "navigations": [
+        {
+          "collection": false,
+          "deleteBehavior": "cascade",
+          "foreignKey": [],
+          "inverse": null,
+          "joinEntity": null,
+          "name": "address",
+          "owned": true,
+          "principalKey": [],
+          "target": "Address"
+        },
+        {
+          "collection": true,
+          "deleteBehavior": "cascade",
+          "foreignKey": [
+            "authorId"
+          ],
+          "inverse": "author",
+          "joinEntity": null,
+          "name": "posts",
+          "owned": false,
+          "principalKey": [
+            "id"
+          ],
+          "target": "Post"
+        },
+        {
+          "collection": true,
+          "deleteBehavior": "cascade",
+          "foreignKey": [],
+          "inverse": "users",
+          "joinEntity": null,
+          "name": "roles",
+          "owned": false,
+          "principalKey": [
+            "id"
+          ],
+          "target": "Role"
+        }
+      ],
+      "owned": false,
+      "properties": [
+        {
+          "column": "createdAt",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": "now()",
+          "maxLength": null,
+          "name": "createdAt",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "onAdd"
+        },
+        {
+          "column": "email_address",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "email",
+          "nullable": true,
+          "type": "unknown",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "id",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "id",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "onAdd"
+        },
+        {
+          "column": "name",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 120,
+          "name": "name",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        }
+      ],
+      "queryFilter": null,
+      "schema": "app",
+      "seedData": [
+        {
+          "id": 1,
+          "name": "Root"
+        }
+      ],
+      "table": "users"
+    }
+  ],
+  "version": 1
+}

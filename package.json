@@ -1,0 +1,25 @@
+{
+  "name": "ormit-monorepo",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "tsc -b packages/core packages/testing packages/engine-kysely packages/dialect-sqlite packages/plugins packages/migrations packages/cli packages/decorators",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:types": "tsc -p packages/core/test-d/tsconfig.json",
+    "typecheck": "tsc -b --dry || tsc -b",
+    "check:deps": "node scripts/check-deps.mjs",
+    "perf:compile": "node scripts/compile-perf.mjs",
+    "gate": "pnpm build && pnpm check:deps && pnpm test:types && pnpm test:coverage",
+    "gate:rc": "pnpm gate && pnpm perf:compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@vitest/coverage-v8": "2.1.9",
+    "esbuild": "0.21.5",
+    "fast-check": "^3",
+    "terser": "^5",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
+  }
+}

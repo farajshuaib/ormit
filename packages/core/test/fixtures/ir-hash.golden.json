@@ -1,0 +1,21 @@
+{
+  "binary": "85da374f",
+  "logicalAnd": "01a31bfd",
+  "logicalOr": "f346b85d",
+  "not": "fff08b3c",
+  "nullcheck": "87721f62",
+  "notNull": "777c0b8f",
+  "likeStarts": "90dab0d3",
+  "likeEnds": "f1fb2797",
+  "likeContains": "b7e0a2ee",
+  "likeRaw": "4ef1fd5d",
+  "inList": "7adfccc5",
+  "between": "508785b7",
+  "columnToColumn": "816a6f86",
+  "functionLower": "97e5582f",
+  "functionUpper": "bfdfdbd7",
+  "existsAny": "f6420b1f",
+  "existsBare": "1426aa13",
+  "existsAll": "d9ae214a",
+  "subAggregate": "d18a85ee"
+}

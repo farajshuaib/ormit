@@ -32,6 +32,8 @@ await db.saveChanges();
 | `@ormit/core` | IR, expression recorder, Queryable + pipeline (normalizer/optimizer/cache), DbContext/DbSet, change tracking (identity map + UoW), metadata (ModelBuilder + conventions + ModelSnapshot), engine contracts. Zero deps. |
 | `@ormit/engine-kysely` | Lowers IR onto Kysely; per-dialect SQL compilation (PG + SQLite so far). |
 | `@ormit/sqlite` | SQLite dialect: Kysely `sqlite` generator + a better-sqlite3 executor (real execution). |
+| `@ormit/postgres` | PostgreSQL dialect: Kysely `postgres` generator + a node-postgres executor (RETURNING, connection-affine transactions). |
+| `@ormit/mysql` | MySQL dialect: Kysely `mysql` generator + a mysql2 executor (`insertId` key write-back; implicit DDL commit). |
 | `@ormit/plugins` | First-party plugins (soft-delete, timestamps, multitenancy) — built only on the public plugin surface. |
 | `@ormit/migrations` | Model differ (snapshot vs snapshot), TS migration emitter, runner with history, snapshot repair. |
 | `@ormit/cli` | Command facade behind the `ormit` binary (migrations add/list, database update, script, repair). |
@@ -47,6 +49,7 @@ pnpm test           # vitest (194 tests, incl. real SQLite + property round-trip
 pnpm test:types     # tsd-style compile-time rejection of illegal operators
 pnpm test:coverage  # + conventions branch-coverage gate (100%)
 pnpm perf:compile   # compile-time perf gate (50-entity model typechecks < 3s)
+pnpm test:containers # PG + MySQL compatibility suites on real servers (needs Docker)
 pnpm gate           # build + deps + type tests + coverage
 pnpm gate:rc        # gate + compile-perf (release-candidate gate)
 ```
@@ -118,9 +121,15 @@ pnpm gate:rc        # gate + compile-perf (release-candidate gate)
   3s); MIT `LICENSE`, `SECURITY.md`, and a [guide](docs/guide.md) with a "Coming from
   EF Core" table.
 
+- **Real-database dialects:** `@ormit/postgres` (node-postgres) and `@ormit/mysql`
+  (mysql2) run the behavioral compatibility suite — CRUD, global query filters,
+  aggregates, optimistic concurrency, transaction rollback — against **real servers via
+  Testcontainers** (`pnpm test:containers`; gated behind `ORMIT_TESTCONTAINERS` so the
+  default gate stays offline). MySQL exercises the no-`RETURNING`/`insertId` path.
+
 ## Remaining for 1.0 (per plan)
 
-Postgres/MySQL/MSSQL executor packages behind Testcontainers (the SQL is generated and
-snapshot-tested today), the four-dialect compatibility-suite matrix in CI, NestJS/Fastify
-adapters, cross-ORM benchmark publication with the ±10% CI regression gate, and the two
-external pilot sign-offs on the rc checklist.
+The MSSQL executor package (tedious) behind Testcontainers — its SQL is generated and
+snapshot-tested today; the four-dialect matrix wired into CI merge-queue/nightly;
+NestJS/Fastify adapters; cross-ORM benchmark publication with the ±10% CI regression
+gate; and the two external pilot sign-offs on the rc checklist.

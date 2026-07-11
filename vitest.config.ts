@@ -16,6 +16,8 @@ export default defineConfig({
       '@ormit/migrations': src('./packages/migrations/src/index.ts'),
       '@ormit/cli': src('./packages/cli/src/index.ts'),
       '@ormit/decorators': src('./packages/decorators/src/index.ts'),
+      '@ormit/postgres': src('./packages/dialect-postgres/src/index.ts'),
+      '@ormit/mysql': src('./packages/dialect-mysql/src/index.ts'),
     },
   },
   test: {

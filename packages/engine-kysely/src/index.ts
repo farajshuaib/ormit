@@ -182,10 +182,15 @@ function lower(node: BoolExprNode, eb: AnyEb): any {
   }
 }
 
+/** Dialects whose INSERT supports a `RETURNING` clause. */
+const RETURNING_DIALECTS = new Set<SupportedDialect>(['postgres', 'sqlite']);
+
 export class KyselySqlGenerator implements ISqlGenerator {
   private readonly db: AnyKysely;
-  constructor(dialect: SupportedDialect = 'postgres') {
+  private readonly supportsReturning: boolean;
+  constructor(private readonly dialect: SupportedDialect = 'postgres') {
     this.db = compileOnlyKysely(dialect);
+    this.supportsReturning = RETURNING_DIALECTS.has(dialect);
   }
 
   private toCommand(compiled: CompiledQuery, hash: string): CompiledCommand {
@@ -281,7 +286,10 @@ export class KyselySqlGenerator implements ISqlGenerator {
     const table = this.table(op.entity, ctx);
     switch (op.kind) {
       case 'insert': {
-        const q: any = this.db.insertInto(table).values(op.values).returningAll();
+        let q: any = this.db.insertInto(table).values(op.values);
+        // MySQL/MSSQL have no INSERT … RETURNING; their executors read the
+        // generated key from the driver result instead.
+        if (this.supportsReturning) q = q.returningAll();
         return this.toCommand(q.compile(), irHash(op));
       }
       case 'update': {

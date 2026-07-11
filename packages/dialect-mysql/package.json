@@ -1,0 +1,17 @@
+{
+  "name": "@ormit/mysql",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "sideEffects": false,
+  "dependencies": {
+    "@ormit/core": "workspace:*",
+    "@ormit/engine-kysely": "workspace:*",
+    "mysql2": "^3.11.0"
+  },
+  "devDependencies": {
+    "@testcontainers/mysql": "^10.13.0"
+  }
+}

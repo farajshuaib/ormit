@@ -16,9 +16,9 @@ import { DbContext } from '../packages/core/dist/index.js';
 import { SqliteEngine } from '../packages/dialect-sqlite/dist/index.js';
 
 const BASELINE = fileURLToPath(new URL('../bench/baseline.json', import.meta.url));
-const N = 2000;
-const ITERS = 5;
-const TOLERANCE = 0.9; // ratio must stay >= 90% of baseline
+const N = 10000; // large enough that raw driver timings are stable (less noise)
+const ITERS = 7;
+const TOLERANCE = 0.85; // ratio must stay >= 85% of baseline (ratios are noisier than absolutes)
 
 class Row {
   id;

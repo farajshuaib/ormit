@@ -89,6 +89,36 @@ await engine.exec(`CREATE TABLE users (id INT IDENTITY(1,1) PRIMARY KEY, name NV
 
 Then `const db = new AppDb({ engine })` — the rest of your code is portable.
 
+## Defining a model
+
+Entities are POCOs; configure them fluently in `onModelCreating` (precedence
+`convention < decorator < fluent`).
+
+```ts
+m.entity(Post, e => {
+  e.toTable('posts', 'blog').hasKey('id');          // table + schema; composite: hasKey('a','b')
+  e.property(x => x.title).hasMaxLength(200).isRequired();
+  e.property(x => x.createdAt).hasDefaultSql('now()').valueGenerated('onAdd');
+  e.property(x => x.version).isConcurrencyToken();
+  e.hasIndex('slug').isUnique();
+  e.hasQueryFilter(x => x.deleted.eq(false));        // applied to every read
+  e.hasData({ id: 1, title: 'Seed' });               // seed row for migrations
+
+  // Relationships (1:1, 1:N, N:M) + delete behavior.
+  e.hasOne(User, x => x.author).withMany(u => u.posts).hasForeignKey('authorId').onDelete('cascade');
+  e.ownsOne(Address, x => x.address);                // value object flattened into the table
+});
+
+// TPH inheritance — one table, a discriminator per subtype.
+m.entity(Dog, e => e.toTable('animals').hasKey('id').hasDiscriminator('kind', 'dog'));
+m.entity(Cat, e => e.toTable('animals').hasKey('id').hasDiscriminator('kind', 'cat'));
+```
+
+Property options: `hasColumnName`, `hasType`, `hasMaxLength`, `isRequired`,
+`hasDefault`, `hasDefaultSql`, `valueGenerated`, `isConcurrencyToken`,
+`hasComment`. Prefer decorators? `@ormit/decorators` (`@entity/@key/@column/
+@hasOne/@hasMany`) replays into the same builder via `applyDecorators(m, [...])`.
+
 ## Querying
 
 - **Filter/shape:** `where`, `orderBy(Descending)`, `skip`, `take`, `distinct`,
@@ -105,13 +135,178 @@ Then `const db = new AppDb({ engine })` — the rest of your code is portable.
 `add/attach/remove/find`, then `saveChanges()` — change detection, FK topo-sort,
 atomic transaction, generated-key write-back, optimistic concurrency
 (`ConcurrencyError`). `database.transaction(fn)` gives ambient transactions.
+Inspect tracking with `db.entry(entity)` (`state`, `modifiedProperties()`).
+
+Contexts are per-request and not concurrency-safe — pool them:
+
+```ts
+import { createContextFactory } from '@ormit/core';
+const factory = createContextFactory(AppDb, { engine, poolSize: 8 });
+await factory.scoped(async (db) => { db.users.add(user); await db.saveChanges(); });
+```
+
+## Relationships & loading
+
+```ts
+// Eager — split queries by default (no cartesian explosion).
+const blogs = await db.blogs.include(x => x.posts).thenInclude(p => p.comments).toList();
+
+// Explicit — on demand.
+await db.entry(post).reference('author').load();
+await db.entry(blog).collection('posts').load();
+
+// Lazy — opt-in, always awaited.
+const author = await db.lazyReference<User>(post, 'author').load();
+```
+
+Cascade delete / `setNull` honored on `saveChanges()`. In diagnostics mode
+(`new AppDb({ engine, diagnostics: true, onWarning })`) an N+1 detector flags
+repeated single-entity loads (`OMT2001`).
+
+## Plugins
+
+```ts
+import { softDelete, timestamps, multitenancy } from '@ormit/plugins';
+const db = new AppDb({ engine, plugins: [softDelete(), timestamps(), multitenancy({ tenant })] });
+```
+
+Write your own on the `OrmPlugin` surface — `configureModel`, `normalizerPasses`,
+and interceptors (`savingChanges`/`savedChanges`/`commandExecuting`/`commandExecuted`):
+
+```ts
+const audit: OrmPlugin = {
+  name: 'audit',
+  interceptors: {
+    savingChanges(ctx) {
+      for (const e of ctx.entries)
+        if (e.state === 'Added' || e.state === 'Modified') (e.entity as any).updatedBy = user();
+    },
+  },
+};
+```
+
+## Web adapters
+
+`@ormit/adapters` creates a pooled context per request and disposes it at the end:
+
+```ts
+import { createOrmitFactory, ormitExpress, ormitFastify, ormitNestProviders } from '@ormit/adapters';
+
+const factory = createOrmitFactory(AppDb, { engine, poolSize: 8 });
+app.use(ormitExpress(factory));                       // Express → req.db
+fastify.register(ormitFastify(factory));              // Fastify → request.db
+// NestJS: providers: ormitNestProviders(AppDb, { engine })  // REQUEST-scoped AppDb
+```
+
+## Testing
+
+`@ormit/testing` ships an in-memory engine with real query semantics — no DB, no Docker:
+
+```ts
+import { InMemoryEngine } from '@ormit/testing';
+
+const engine = new InMemoryEngine();
+engine.seed('users', [{ id: 1, name: 'Amal', age: 30 }]);
+const db = new AppDb({ engine });
+expect(await db.users.where(x => x.age.gte(18)).count()).toBe(1);
+```
 
 ## Migrations
 
+Migrations come from diffing your model snapshot against the last *committed* one
+(never the live DB, ADR-006). Share one model definition between the context and
+the tooling, then diff → emit → run.
+
+```ts
+import { ModelBuilder, ModelSnapshot } from '@ormit/core';
+
+export function defineModel(m: ModelBuilder) {
+  m.entity(User, e => e.toTable('users').hasKey('id'));
+  m.entity(Post, e => {
+    e.toTable('posts').hasKey('id');
+    e.hasOne(User, x => x.author).withMany(u => u.posts).hasForeignKey('authorId');
+  });
+}
+
+class AppDb extends DbContext {
+  protected onModelCreating(m: ModelBuilder) { defineModel(m); }
+}
+
+const mb = new ModelBuilder();
+defineModel(mb);
+const model = ModelSnapshot.build(mb);   // immutable, byte-stable snapshot
+```
+
+**Diff & apply** — the runner tracks state in an `__ormit_migrations` table:
+
+```ts
+import { diffWithDown, EMPTY_SNAPSHOT, snapshotData, Migrator } from '@ormit/migrations';
+
+const { up, down } = diffWithDown(EMPTY_SNAPSHOT, snapshotData(model));  // first migration
+const migrator = new Migrator(engine, [{ id: '0001_init', up, down }]);
+
+await migrator.up();                    // apply pending — idempotent, safe to run twice
+console.log(await migrator.applied());  // ['0001_init']
+await migrator.down(1);                 // revert the last migration
+```
+
+**Evolving the schema** — diff the committed snapshot against the current model
+(each change gets an automatic inverse), then emit a hand-mergeable TS file:
+
+```ts
+import { readFileSync, writeFileSync } from 'node:fs';
+import { deserializeSnapshot } from '@ormit/core';
+import { diffWithDown, emitMigration, repairSnapshot } from '@ormit/migrations';
+
+const committed = deserializeSnapshot(readFileSync('model.snapshot.json', 'utf8'));
+const { up, down } = diffWithDown(committed, snapshotData(model));
+// up: [{ kind: 'addColumn', table: 'users', column: { name: 'age', … } }]
+
+const { filename, source } = emitMigration('add age', up, down);
+writeFileSync(`migrations/${filename}`, source);       // 20260101120000_add_age.ts
+writeFileSync('model.snapshot.json', model.toJSON());  // commit the new snapshot
+
+// After a merge conflict in the snapshot, re-derive the canonical form:
+const { snapshot, changed } = repairSnapshot(model, readFileSync('model.snapshot.json', 'utf8'));
+if (changed) writeFileSync('model.snapshot.json', snapshot);
+```
+
+## CLI
+
+`@ormit/cli` is the injectable core behind the `ormit` command — pass your engine,
+model, committed snapshot, and known migrations, then call the verbs:
+
+```ts
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createCli } from '@ormit/cli';
+
+const cli = createCli({
+  engine,
+  model,                                   // ModelSnapshot (built above)
+  committedSnapshot: existsSync('model.snapshot.json')
+    ? readFileSync('model.snapshot.json', 'utf8') : undefined,
+  migrations,                              // Migration[] emitted so far
+});
+
+const { migration, snapshot, destructive } = cli.add('init');  // diff → migration + snapshot
+writeFileSync(`migrations/${migration.filename}`, migration.source);
+writeFileSync('model.snapshot.json', snapshot);
+
+await cli.update();                        // apply pending → ['0001_init']
+await cli.revert(1);                       // roll back the last
+const { applied, pending } = await cli.list();
+const sql = cli.script();                  // forward DDL as text
+cli.repair();                              // re-derive the snapshot
+```
+
+A thin binary wraps these into terminal verbs:
+
 ```bash
 ormit migrations add "init"     # diff model vs committed snapshot → migration + snapshot
+ormit migrations list           # applied vs. pending
 ormit database update           # apply pending (idempotent)
 ormit database update --down 1  # revert the last migration
+ormit script                    # print the forward DDL
 ormit migrations repair         # re-derive the snapshot after a merge conflict
 ```
 

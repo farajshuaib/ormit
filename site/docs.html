@@ -34,8 +34,12 @@
         <a href="#relationships">Relationships &amp; loading</a>
         <div class="group">Operations</div>
         <a href="#migrations">Migrations</a>
+        <a href="#cli">CLI</a>
         <a href="#plugins">Plugins</a>
         <a href="#dialects">Dialects</a>
+        <div class="group">Integrate</div>
+        <a href="#adapters">Web adapters</a>
+        <a href="#testing">Testing</a>
         <div class="group">Reference</div>
         <a href="#ef-core">From EF Core</a>
         <a href="#diagnostics">Diagnostics</a>
@@ -141,27 +145,81 @@ const adults = await db.users.where(x =&gt; x.age.gte(18)).toList();</code></pre
       <h2 id="modeling">Defining a model <a class="anchor" href="#modeling">#</a></h2>
       <p>Entities are plain classes (POCOs). Configure them fluently in <code>onModelCreating</code>. Precedence is <strong>convention &lt; decorator &lt; fluent</strong> — you only configure what conventions can't infer.</p>
       <pre><code class="language-ts">m.entity(Post, e =&gt; {
-  e.toTable('posts', 'blog');                 // table + optional schema
-  e.hasKey('id');                             // or composite: hasKey('a', 'b')
+  e.toTable('posts', 'blog');                        // table + optional schema
+  e.hasKey('id');                                    // or composite: hasKey('a', 'b')
+
   e.property(x =&gt; x.title).hasMaxLength(200).isRequired();
-  e.property(x =&gt; x.body).hasConversion('markdown');
-  e.hasIndex('slug').isUnique();
-  e.hasOne(User, x =&gt; x.author).withMany(u =&gt; u.posts).hasForeignKey('authorId');
-  e.ownsOne(Address, x =&gt; x.address);         // flattened into prefixed columns
-  e.hasQueryFilter(x =&gt; x.deleted.eq(false)); // global filter
-  e.hasData({ id: 1, title: 'Seed' });        // seed row
+  e.property(x =&gt; x.slug).hasColumnName('slug_key'); // physical column name
+  e.property(x =&gt; x.views).hasType('number').hasDefault(0);
+  e.property(x =&gt; x.createdAt).hasDefaultSql('now()').valueGenerated('onAdd');
+  e.property(x =&gt; x.rowVersion).isConcurrencyToken();
+  e.property(x =&gt; x.note).isRequired(false).hasComment('optional');
+
+  e.hasIndex('slug').isUnique().hasName('ix_post_slug');
+  e.hasQueryFilter(x =&gt; x.deleted.eq(false));        // applied to every read
+  e.hasData({ id: 1, title: 'Seed', slug: 'seed' }); // seed row for migrations
 });</code></pre>
-      <div class="callout">The model finalizes once per context class into an immutable, JSON-serializable <strong>ModelSnapshot</strong> (sorted keys, byte-stable) that the migrations differ consumes. Invalid models throw eagerly with an actionable <code>OMT12xx</code> code.</div>
-      <p>Prefer decorators? <code>@ormit/decorators</code> replays into the same builder:</p>
-      <pre><code class="language-ts">import { entity, key, column, hasMany, applyDecorators } from '@ormit/decorators';
+      <p><strong>Property options</strong> (chain on <code>property(x =&gt; x.field)</code>): <code>hasColumnName</code>,
+      <code>hasType</code>, <code>hasMaxLength</code>, <code>isRequired</code>, <code>hasDefault</code>,
+      <code>hasDefaultSql</code>, <code>valueGenerated('onAdd' | 'onAddOrUpdate')</code>,
+      <code>isConcurrencyToken</code>, <code>hasComment</code>.</p>
+
+      <h3>Composite keys, owned types &amp; inheritance</h3>
+      <pre><code class="language-ts">// Composite primary key.
+m.entity(OrderLine, e =&gt; e.hasKey('orderId', 'lineNo'));
+
+// Owned types — value objects flattened into the owner's table (address_city, …).
+m.entity(User, e =&gt; {
+  e.hasKey('id');
+  e.ownsOne(Address, x =&gt; x.address, a =&gt; a.property(p =&gt; p.city).hasMaxLength(80));
+  e.ownsMany(Tag, x =&gt; x.tags);   // owned collection in its own table
+});
+
+// Table-per-hierarchy (TPH) — one table, a discriminator column per subtype.
+m.entity(Dog, e =&gt; e.toTable('animals').hasKey('id').hasDiscriminator('kind', 'dog'));
+m.entity(Cat, e =&gt; e.toTable('animals').hasKey('id').hasDiscriminator('kind', 'cat'));</code></pre>
+
+      <h3>Relationships</h3>
+      <pre><code class="language-ts">// One-to-many (and its inverse to-one).
+e.hasOne(User, x =&gt; x.author).withMany(u =&gt; u.posts)
+  .hasForeignKey('authorId')
+  .onDelete('cascade');            // 'cascade' | 'setNull' | 'restrict' | 'noAction'
+
+// One-to-one.
+e.hasOne(Profile, x =&gt; x.profile).withOne(p =&gt; p.user).hasForeignKey('userId');
+
+// Optional reference (nullable FK → setNull default).
+e.hasOne(Team, x =&gt; x.team).withMany().hasForeignKey('teamId').isRequired(false);
+
+// Many-to-many (implicit join, or an explicit join entity with payload).
+e.hasMany(Role, x =&gt; x.roles).withMany(r =&gt; r.users);
+e.hasMany(Role, x =&gt; x.roles).withMany(r =&gt; r.users, UserRole); // usingEntity</code></pre>
+      <div class="callout">The model finalizes once per context class into an immutable, JSON-serializable <strong>ModelSnapshot</strong> (sorted keys, byte-stable) that the migrations differ consumes. Invalid models throw eagerly with an actionable <code>OMT12xx</code> code — see <a href="#diagnostics">Diagnostics</a>.</div>
+
+      <h3>Decorators</h3>
+      <p>Prefer decorators? <code>@ormit/decorators</code> replays into the same builder — call <code>applyDecorators(model, [...])</code> at the top of <code>onModelCreating</code>, then override fluently if needed:</p>
+      <pre><code class="language-ts">import { entity, key, column, hasMany, hasOne, applyDecorators } from '@ormit/decorators';
 
 @entity({ table: 'users' })
 class User {
   @key() id!: number;
   @column({ maxLength: 80 }) name!: string;
+  @column({ concurrencyToken: true }) version!: number;
   @hasMany(() =&gt; Post, { foreignKey: 'authorId' }) posts!: Post[];
 }
-// inside onModelCreating: applyDecorators(model, [User, Post]);</code></pre>
+
+@entity({ table: 'posts' })
+class Post {
+  @key() id!: number;
+  @column({ maxLength: 200 }) title!: string;
+  @hasOne(() =&gt; User, { foreignKey: 'authorId' }) author!: User;
+}
+
+class AppDb extends DbContext {
+  protected onModelCreating(m: ModelBuilder) {
+    applyDecorators(m, [User, Post]);
+  }
+}</code></pre>
 
       <h2 id="querying">Querying <a class="anchor" href="#querying">#</a></h2>
       <p>Every <code>Queryable</code> is immutable — each call returns a new query. The lambda runs once at build time against a typed Proxy that records an IR.</p>
@@ -179,6 +237,8 @@ class User {
         <tr><td>String</td><td><code>startsWith</code> <code>endsWith</code> <code>contains</code> <code>like</code> <code>toLower</code> <code>toUpper</code></td></tr>
         <tr><td>To-many nav</td><td><code>any(pred?)</code> <code>all(pred)</code> <code>count()</code> → EXISTS / subquery</td></tr>
       </table>
+      <h3>Shaping</h3>
+      <p>Chain <code>where</code> (ANDed), <code>orderBy</code>/<code>orderByDescending</code> (call again for secondary sorts), <code>skip</code>/<code>take</code>, <code>distinct()</code>, and <code>select(x =&gt; ({ … }))</code> projections.</p>
       <h3>Terminals</h3>
       <p><code>toList</code>, <code>first</code>/<code>firstOrNull</code>, <code>single</code>/<code>singleOrNull</code>, <code>count</code>, <code>any</code>, <code>sum</code>/<code>avg</code>/<code>min</code>/<code>max</code>, <code>toPage(page, size)</code>.</p>
       <h3>Raw SQL &amp; tracking</h3>
@@ -201,7 +261,31 @@ await db.database.transaction(async () =&gt; {
   await db.saveChanges();
 });</code></pre>
       <div class="callout">Mark a property <code>.isConcurrencyToken()</code> (e.g. a <code>version</code> or rowversion). If a tracked update or delete matches zero rows, <code>saveChanges()</code> throws <strong><code>ConcurrencyError</code></strong>.</div>
-      <p>Contexts are short-lived and per-request. <code>createContextFactory()</code> pools and resets them; <code>@ormit/adapters</code> wires that into Express, Fastify, and NestJS.</p>
+      <h3>Entries &amp; state</h3>
+      <p>Inspect or drive tracking through <code>db.entry(entity)</code> — the state machine is
+      <code>Detached / Added / Unchanged / Modified / Deleted</code>:</p>
+      <pre><code class="language-ts">const entry = db.entry(user);
+entry.state;                    // 'Unchanged' | 'Modified' | …
+entry.modifiedProperties();     // ['name']  — scalar props that changed vs. the snapshot
+db.users.attach(detachedUser);  // track an existing row as Unchanged
+db.users.add(newUser);          // Added; db.users.remove(user) → Deleted</code></pre>
+
+      <h3>Context lifecycle</h3>
+      <p>Contexts are short-lived and not concurrency-safe. Use a pooled factory (and dispose when done):</p>
+      <pre><code class="language-ts">import { createContextFactory } from '@ormit/core';
+
+const factory = createContextFactory(AppDb, { engine, poolSize: 8 });
+
+await factory.scoped(async (db) =&gt; {          // create → run → auto-release
+  db.users.add(user);
+  await db.saveChanges();
+});
+
+// or manually:
+const db = factory.create();
+try { /* … */ } finally { await factory.release(db); }
+// contexts also implement Symbol.asyncDispose: `await using db = factory.create();`</code></pre>
+      <p>For web servers, <code>@ormit/adapters</code> wires this per-request into Express, Fastify, and NestJS — see <a href="#adapters">Web adapters</a>.</p>
 
       <h2 id="relationships">Relationships &amp; loading <a class="anchor" href="#relationships">#</a></h2>
       <p>Configure 1:1, 1:N, and N:M with <code>hasOne</code>/<code>hasMany</code>. Load related data eagerly, explicitly, or lazily.</p>
@@ -216,22 +300,125 @@ await db.entry(post).reference('author').load();
 await db.entry(blog).collection('posts').load();
 
 // Lazy — opt-in, always awaited (no hidden sync getters).
-const author = await db.lazyReference&lt;User&gt;(post, 'author').load();</code></pre>
-      <div class="callout">In diagnostics mode Ormit's <strong>N+1 detector</strong> flags repeated single-entity loads of the same type (code <code>OMT2001</code>) and points you at <code>Include</code>.</div>
+const author = await db.lazyReference&lt;User&gt;(post, 'author').load();
+const posts = await db.lazyCollection&lt;Post&gt;(blog, 'posts').load();
+
+// Filtered + multiple includes.
+const users = await db.users
+  .include(x =&gt; x.posts)
+  .include(x =&gt; x.roles)     // many-to-many, loaded as a split query too
+  .toList();</code></pre>
+      <p>Turn on the N+1 detector by constructing the context in diagnostics mode:</p>
+      <pre><code class="language-ts">const db = new AppDb({ engine, diagnostics: true, onWarning: (w) =&gt; logger.warn(w) });
+// … looping and loading each post's author one-by-one emits OMT2001.</code></pre>
+      <div class="callout"><strong>Cascade delete</strong> — a navigation's <code>onDelete</code> behavior is honored on
+      <code>saveChanges()</code>: <code>cascade</code> bulk-deletes children, <code>setNull</code> clears their FK.
+      Removing a principal removes its dependents automatically.</div>
 
       <h2 id="migrations">Migrations <a class="anchor" href="#migrations">#</a></h2>
-      <p>Migrations come from diffing your model snapshot against the last committed one — never from introspecting the live database. That keeps them deterministic and mergeable.</p>
+      <p>Migrations come from diffing your model snapshot against the last <em>committed</em> one — never from introspecting the live database (ADR-006). That keeps them deterministic and mergeable. The flow: <strong>build the model → diff → emit a migration file &amp; commit the new snapshot → run the migrator.</strong></p>
+
+      <p>Share one model definition between your context and the migration tooling:</p>
+      <pre><code class="language-ts">import { ModelBuilder, ModelSnapshot } from '@ormit/core';
+
+export function defineModel(m: ModelBuilder) {
+  m.entity(User, e =&gt; e.toTable('users').hasKey('id'));
+  m.entity(Post, e =&gt; {
+    e.toTable('posts').hasKey('id');
+    e.hasOne(User, x =&gt; x.author).withMany(u =&gt; u.posts).hasForeignKey('authorId');
+  });
+}
+
+// The context uses it…
+class AppDb extends DbContext {
+  protected onModelCreating(m: ModelBuilder) { defineModel(m); }
+}
+
+// …and so does the tooling — build an immutable, byte-stable snapshot.
+const mb = new ModelBuilder();
+defineModel(mb);
+const model = ModelSnapshot.build(mb);</code></pre>
+
+      <h3>Diff &amp; apply</h3>
       <pre><code class="language-ts">import { diffWithDown, EMPTY_SNAPSHOT, snapshotData, Migrator } from '@ormit/migrations';
 
+// First migration: diff the model against an empty baseline.
 const { up, down } = diffWithDown(EMPTY_SNAPSHOT, snapshotData(model));
-const migrator = new Migrator(engine, [{ id: '0001_init', up, down }]);
 
-await migrator.up();      // apply pending — idempotent, safe to run twice
-await migrator.down(1);   // revert the last migration</code></pre>
-      <p>The <code>@ormit/cli</code> facade backs the intended <code>ormit</code> verbs:</p>
+const migrator = new Migrator(engine, [{ id: '0001_init', up, down }]);
+await migrator.up();                    // apply pending — idempotent, safe to run twice
+console.log(await migrator.applied());  // ['0001_init']  (tracked in __ormit_migrations)
+await migrator.down(1);                 // revert the last migration</code></pre>
+
+      <h3>Evolving the schema</h3>
+      <p>For later changes, diff the <em>committed</em> snapshot against your current model. Each change becomes an operation with an automatic inverse:</p>
+      <pre><code class="language-ts">import { readFileSync } from 'node:fs';
+import { deserializeSnapshot } from '@ormit/core';
+
+const committed = deserializeSnapshot(readFileSync('model.snapshot.json', 'utf8'));
+const { up, down } = diffWithDown(committed, snapshotData(model));
+// up:   [{ kind: 'addColumn', table: 'users', column: { name: 'age', … } }]
+// down: [{ kind: 'dropColumn', table: 'users', column: 'age' }]</code></pre>
+
+      <h3>Emit a migration file</h3>
+      <pre><code class="language-ts">import { emitMigration } from '@ormit/migrations';
+
+const { id, filename, source } = emitMigration('add age', up, down);
+// filename → 20260101120000_add_age.ts  (write `source` into your migrations dir)</code></pre>
+      <p>The emitted module is plain, hand-mergeable TypeScript:</p>
+      <pre><code class="language-ts">// 20260101120000_add_age.ts
+import type { MigrationOperation } from '@ormit/core';
+
+export const id = '20260101120000_add_age';
+export const up: MigrationOperation[] = [
+  { kind: 'addColumn', table: 'users',
+    column: { name: 'age', type: 'number', nullable: true,
+              maxLength: null, defaultValue: null, defaultValueSql: null } },
+];
+export const down: MigrationOperation[] = [
+  { kind: 'dropColumn', table: 'users', column: 'age' },
+];</code></pre>
+
+      <h3>Repair a merge conflict</h3>
+      <p>If two branches both edit the committed <code>.snapshot.json</code>, re-derive the canonical snapshot from the model (the source of truth):</p>
+      <pre><code class="language-ts">import { writeFileSync } from 'node:fs';
+import { repairSnapshot } from '@ormit/migrations';
+
+const { snapshot, changed } = repairSnapshot(model, readFileSync('model.snapshot.json', 'utf8'));
+if (changed) writeFileSync('model.snapshot.json', snapshot);  // resolved deterministically</code></pre>
+      <div class="callout">SQLite migrations run in a transaction; MySQL commits DDL implicitly, so its migrations aren't atomic. Every operation set carries an auto-generated inverse, so <code>down()</code> always exists.</div>
+
+      <h2 id="cli">CLI <a class="anchor" href="#cli">#</a></h2>
+      <p><code>@ormit/cli</code> is the programmable core behind the <code>ormit</code> command. Inject your engine, model, committed snapshot, and known migrations, then call the verbs — it's fully unit-testable without a real filesystem or process:</p>
+      <pre><code class="language-ts">import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createCli } from '@ormit/cli';
+
+const cli = createCli({
+  engine,
+  model,                                   // ModelSnapshot from defineModel()
+  committedSnapshot: existsSync('model.snapshot.json')
+    ? readFileSync('model.snapshot.json', 'utf8')
+    : undefined,
+  migrations,                              // Migration[] you've emitted so far
+});
+
+// `ormit migrations add <name>` — diff, then emit a migration + the snapshot to commit.
+const { migration, snapshot, destructive } = cli.add('init');
+writeFileSync(`migrations/${migration.filename}`, migration.source);
+writeFileSync('model.snapshot.json', snapshot);
+if (destructive) console.warn('⚠ this migration drops a table or column');
+
+await cli.update();                        // `ormit database update`  → ['0001_init']
+await cli.revert(1);                       // `ormit database update --down 1`
+const { applied, pending } = await cli.list();  // `ormit migrations list`
+const sql = cli.script();                  // `ormit script` — forward DDL as text
+const { changed } = cli.repair();          // `ormit migrations repair`</code></pre>
+      <p>A thin binary wraps these into the terminal verbs:</p>
       <pre><code class="language-bash">ormit migrations add "init"     # diff → migration file + snapshot to commit
+ormit migrations list           # applied vs. pending
 ormit database update           # apply pending (idempotent)
-ormit database update --down 1  # revert
+ormit database update --down 1  # revert the last
+ormit script                    # print the forward DDL
 ormit migrations repair         # re-derive the snapshot after a merge conflict</code></pre>
 
       <h2 id="plugins">Plugins <a class="anchor" href="#plugins">#</a></h2>
@@ -247,6 +434,33 @@ const db = new AppDb({
   ],
 });</code></pre>
 
+      <h3>Writing your own</h3>
+      <p>A plugin is just an object on the <code>OrmPlugin</code> surface. <code>configureModel</code> shapes the model, <code>normalizerPasses</code> rewrite queries (IR → IR), and <code>interceptors</code> hook the save/command lifecycle:</p>
+      <pre><code class="language-ts">import type { OrmPlugin } from '@ormit/core';
+
+function auditColumns(): OrmPlugin {
+  return {
+    name: 'audit',
+    interceptors: {
+      // Stamp updatedBy on every insert/update before ops are built.
+      savingChanges(ctx) {
+        for (const entry of ctx.entries) {
+          if (entry.state === 'Added' || entry.state === 'Modified') {
+            (entry.entity as any).updatedBy = currentUser();
+          }
+        }
+      },
+      // Observe every executed write command (e.g. for logging / OTel).
+      commandExecuted(cmd, result) {
+        logger.debug({ sql: cmd.sql, affected: result.affected });
+      },
+    },
+  };
+}</code></pre>
+      <p>Hooks available: <code>configureModel(model)</code>, <code>normalizerPasses: NormalizerPass[]</code>, and
+      interceptors <code>savingChanges</code> / <code>savedChanges</code> / <code>commandExecuting</code> /
+      <code>commandExecuted</code>. The first-party plugins use nothing else.</p>
+
       <h2 id="dialects">Dialects <a class="anchor" href="#dialects">#</a></h2>
       <table>
         <tr><th>Package</th><th>Driver</th><th>Notes</th></tr>
@@ -256,6 +470,62 @@ const db = new AppDb({
         <tr><td><code>@ormit/mssql</code></td><td>mssql (tedious)</td><td>OUTPUT INSERTED.* · TOP / OFFSET…FETCH</td></tr>
       </table>
       <p>A dialect "supports" Ormit iff it passes the behavioral compatibility suite unmodified. All four do, verified against real servers via Testcontainers.</p>
+
+      <h2 id="adapters">Web adapters <a class="anchor" href="#adapters">#</a></h2>
+      <p>A <code>DbContext</code> is short-lived and per-request. <code>@ormit/adapters</code> creates a pooled context at the start of each request and disposes it at the end — for Express, Fastify, and NestJS. Build the factory once at startup:</p>
+      <pre><code class="language-ts">import { createOrmitFactory } from '@ormit/adapters';
+
+const factory = createOrmitFactory(AppDb, { engine, poolSize: 8 });</code></pre>
+
+      <h3>Express</h3>
+      <pre><code class="language-ts">import { ormitExpress } from '@ormit/adapters';
+
+app.use(ormitExpress(factory));              // attaches req.db, disposes on response end
+app.get('/users', async (req, res) =&gt; {
+  res.json(await (req as any).db.users.toList());
+});</code></pre>
+
+      <h3>Fastify</h3>
+      <pre><code class="language-ts">import { ormitFastify } from '@ormit/adapters';
+
+fastify.register(ormitFastify(factory));     // decorates request.db
+fastify.get('/users', async (req) =&gt; (req as any).db.users.toList());</code></pre>
+
+      <h3>NestJS</h3>
+      <pre><code class="language-ts">import { Module } from '@nestjs/common';
+import { ormitNestProviders } from '@ormit/adapters';
+
+@Module({
+  providers: ormitNestProviders(AppDb, { engine }),   // singleton factory + REQUEST-scoped AppDb
+  exports: [AppDb],
+})
+export class DataModule {}
+
+// then inject AppDb into any request-scoped provider:
+constructor(private readonly db: AppDb) {}</code></pre>
+      <p>Prefer to manage the lifecycle yourself? <code>openScope(factory)</code> returns <code>{ db, dispose }</code>,
+      or use the pooled factory directly — <code>factory.create()</code>, <code>factory.release(db)</code>,
+      <code>factory.scoped(work)</code>.</p>
+
+      <h2 id="testing">Testing <a class="anchor" href="#testing">#</a></h2>
+      <p><code>@ormit/testing</code> ships an <strong>in-memory engine</strong> with real query semantics — filters, ordering, paging, aggregates, and writes all execute in-process, so unit tests need no database and no Docker.</p>
+      <pre><code class="language-ts">import { InMemoryEngine } from '@ormit/testing';
+
+const engine = new InMemoryEngine();
+engine.seed('users', [
+  { id: 1, name: 'Amal', age: 30 },
+  { id: 2, name: 'Bilal', age: 17 },
+]);
+
+const db = new AppDb({ engine });
+const adults = await db.users.where(x =&gt; x.age.gte(18)).toList();  // [Amal]
+
+// Assert against executed commands and stored rows.
+db.users.add(Object.assign(new User(), { name: 'Nour', age: 28 }));
+await db.saveChanges();
+expect(engine.rows('users')).toHaveLength(3);
+expect(engine.log.length).toBeGreaterThan(0);   // every compiled command is logged</code></pre>
+      <div class="callout">The in-memory engine is the same seam the dialects implement, so your queries and change tracking behave identically — it's ideal for fast unit tests, with Testcontainers reserved for dialect compatibility.</div>
 
       <h2 id="ef-core">Coming from EF Core <a class="anchor" href="#ef-core">#</a></h2>
       <table>

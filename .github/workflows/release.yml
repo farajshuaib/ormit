@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch: # manual publish to npm (deliberate, not on every push)
 
 concurrency: release-${{ github.ref }}
 
@@ -12,7 +13,32 @@ permissions:
   id-token: write # required for npm provenance
 
 jobs:
-  release:
+  # On push: only open/update the "Version Packages" PR when changesets exist.
+  # This NEVER publishes — merging that PR bumps versions + writes changelogs,
+  # then you publish deliberately via the `publish` job (workflow_dispatch).
+  version:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: changesets/action@v1
+        with:
+          version: pnpm version
+          # No `publish:` here — this job only maintains the Version Packages PR.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  # Manual: publish to npm. Run this after merging a Version Packages PR.
+  # Requires an NPM automation/granular token (2FA-exempt) in `NPM_TOKEN`.
+  publish:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -23,13 +49,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      # Opens/updates a "Version Packages" PR, or publishes when it merges.
-      - uses: changesets/action@v1
-        with:
-          version: pnpm version
-          publish: pnpm release
+      - run: pnpm release # build + changeset publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'

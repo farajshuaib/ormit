@@ -52,7 +52,7 @@ describe('KyselySqlGenerator (ADR-002) — SQL snapshots', () => {
   it('compiles insert with RETURNING (postgres) and delete', () => {
     const gen = new KyselySqlGenerator('postgres');
     const ins = gen.compileWrite(
-      { kind: 'insert', entity: 'User', values: { name: 'Nour', age: 28 } },
+      { kind: 'insert', entity: 'User', values: { name: 'faraj', age: 28 } },
       ctx,
     );
     expect(ins.sql).toBe('insert into "users" ("name", "age") values ($1, $2) returning *');

@@ -173,6 +173,15 @@ footer a:hover { color: var(--text); text-decoration: none; }
 .content th { color: var(--text); font-weight: 600; }
 .content td { color: var(--muted); }
 .callout { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 14px 18px; margin: 18px 0; color: var(--muted); font-size: 0.94rem; }
+
+/* database picker */
+.db-picker { display: inline-flex; gap: 5px; padding: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin: 4px 0 6px; flex-wrap: wrap; }
+.db-btn { padding: 8px 15px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font: inherit; font-weight: 600; font-size: 0.88rem; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.db-btn:hover { color: var(--text); }
+.db-btn.active { background: var(--accent-soft); color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.db-hint { font-size: 0.84rem; color: var(--faint); margin: 0 0 14px; }
+.db-variant[hidden] { display: none; }
+.hero .db-picker { margin-top: 22px; }
 .callout.warn { border-left-color: var(--danger); }
 .anchor { color: var(--faint); margin-left: 8px; opacity: 0; font-weight: 400; }
 .content h2:hover .anchor, .content h3:hover .anchor { opacity: 1; }

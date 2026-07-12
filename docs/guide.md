@@ -41,6 +41,54 @@ const recent = await db.posts
   .toList();
 ```
 
+## Choosing a database
+
+Only the **engine import + construction** and your **DDL dialect** change between
+databases — the `DbContext`, model, queries, and `saveChanges()` are identical.
+Ormit adapts the SQL (`RETURNING` vs `OUTPUT` vs `insertId`, `LIMIT/OFFSET` vs
+`TOP` / `OFFSET…FETCH`) for you.
+
+```bash
+pnpm add @ormit/core @ormit/sqlite     # or @ormit/postgres | @ormit/mysql | @ormit/mssql
+```
+
+**SQLite** (`@ormit/sqlite`, better-sqlite3 — synchronous, in-process):
+
+```ts
+import { SqliteEngine } from '@ormit/sqlite';
+const engine = new SqliteEngine('app.db');            // or ':memory:'
+engine.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, age INTEGER NOT NULL)`);
+```
+
+**PostgreSQL** (`@ormit/postgres`, node-postgres):
+
+```ts
+import { PostgresEngine } from '@ormit/postgres';
+const engine = new PostgresEngine('postgres://user:pass@localhost:5432/app'); // string or PoolConfig
+await engine.exec(`CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, age INTEGER NOT NULL)`);
+```
+
+**MySQL** (`@ormit/mysql`, mysql2):
+
+```ts
+import { MysqlEngine } from '@ormit/mysql';
+const engine = new MysqlEngine('mysql://user:pass@localhost:3306/app');
+await engine.exec(`CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, age INT NOT NULL)`);
+```
+
+**SQL Server** (`@ormit/mssql`, node-mssql):
+
+```ts
+import { MssqlEngine } from '@ormit/mssql';
+const engine = new MssqlEngine({
+  server: 'localhost', user: 'sa', password: process.env.MSSQL_PASSWORD!, database: 'app',
+  options: { encrypt: false, trustServerCertificate: true },
+});
+await engine.exec(`CREATE TABLE users (id INT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(255) NOT NULL, age INT NOT NULL)`);
+```
+
+Then `const db = new AppDb({ engine })` — the rest of your code is portable.
+
 ## Querying
 
 - **Filter/shape:** `where`, `orderBy(Descending)`, `skip`, `take`, `distinct`,

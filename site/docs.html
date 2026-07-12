@@ -48,13 +48,23 @@
       <p class="lead">Ormit is an EF Core–style ORM for TypeScript — <code>DbContext</code>, typed queries, change tracking, and snapshot migrations, on any SQL database.</p>
 
       <h2 id="getting-started">Getting started <a class="anchor" href="#getting-started">#</a></h2>
-      <p>Install the core plus a dialect. SQLite runs in-process and is perfect for getting started or testing:</p>
-      <pre><code class="language-bash">pnpm add @ormit/core @ormit/sqlite
-# or @ormit/postgres · @ormit/mysql · @ormit/mssql</code></pre>
-      <p>Requires Node.js 18+ and TypeScript 5+ (<code>strict</code> recommended).</p>
-      <p>A minimal end-to-end example:</p>
+
+      <p><strong>Choose your database</strong> — the install command and engine setup below update to match, and your choice is remembered across the page.</p>
+      <div class="db-picker" role="tablist" aria-label="Database">
+        <button class="db-btn" data-pick="sqlite">SQLite</button>
+        <button class="db-btn" data-pick="postgres">PostgreSQL</button>
+        <button class="db-btn" data-pick="mysql">MySQL</button>
+        <button class="db-btn" data-pick="mssql">SQL Server</button>
+      </div>
+
+      <p>Install the core plus your dialect. Requires Node.js 18+ and TypeScript 5+ (<code>strict</code> recommended).</p>
+      <div class="db-variant" data-db="sqlite"><pre><code class="language-bash">pnpm add @ormit/core @ormit/sqlite</code></pre></div>
+      <div class="db-variant" data-db="postgres" hidden><pre><code class="language-bash">pnpm add @ormit/core @ormit/postgres</code></pre></div>
+      <div class="db-variant" data-db="mysql" hidden><pre><code class="language-bash">pnpm add @ormit/core @ormit/mysql</code></pre></div>
+      <div class="db-variant" data-db="mssql" hidden><pre><code class="language-bash">pnpm add @ormit/core @ormit/mssql</code></pre></div>
+
+      <p>Define plain entity classes and a context — this part is the same for every database:</p>
       <pre><code class="language-ts">import { DbContext, type DbContextOptions, type ModelBuilder } from '@ormit/core';
-import { SqliteEngine } from '@ormit/sqlite';
 
 class User { id!: number; name!: string; age!: number; }
 
@@ -64,16 +74,69 @@ class AppDb extends DbContext {
   protected onModelCreating(m: ModelBuilder) {
     m.entity(User, e =&gt; e.toTable('users').hasKey('id'));
   }
-}
+}</code></pre>
 
-const engine = new SqliteEngine(':memory:');
-engine.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INT)`);
-const db = new AppDb({ engine });
+      <p>Then pick the engine for your database and open a context:</p>
 
-const nour = db.users.add(Object.assign(new User(), { name: 'Nour', age: 28 }));
+      <div class="db-variant" data-db="sqlite"><pre><code class="language-ts">import { SqliteEngine } from '@ormit/sqlite';
+
+const engine = new SqliteEngine('app.db');   // or ':memory:' for tests
+engine.exec(`
+  CREATE TABLE users (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    age  INTEGER NOT NULL
+  );
+`);
+const db = new AppDb({ engine });</code></pre></div>
+
+      <div class="db-variant" data-db="postgres" hidden><pre><code class="language-ts">import { PostgresEngine } from '@ormit/postgres';
+
+// Accepts a connection string or a node-postgres PoolConfig.
+const engine = new PostgresEngine('postgres://user:pass@localhost:5432/app');
+await engine.exec(`
+  CREATE TABLE users (
+    id   SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    age  INTEGER NOT NULL
+  );
+`);
+const db = new AppDb({ engine });</code></pre></div>
+
+      <div class="db-variant" data-db="mysql" hidden><pre><code class="language-ts">import { MysqlEngine } from '@ormit/mysql';
+
+const engine = new MysqlEngine('mysql://user:pass@localhost:3306/app');
+await engine.exec(`
+  CREATE TABLE users (
+    id   INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    age  INT NOT NULL
+  );
+`);
+const db = new AppDb({ engine });</code></pre></div>
+
+      <div class="db-variant" data-db="mssql" hidden><pre><code class="language-ts">import { MssqlEngine } from '@ormit/mssql';
+
+const engine = new MssqlEngine({
+  server: 'localhost', user: 'sa', password: process.env.MSSQL_PASSWORD!,
+  database: 'app',
+  options: { encrypt: false, trustServerCertificate: true },
+});
+await engine.exec(`
+  CREATE TABLE users (
+    id   INT IDENTITY(1,1) PRIMARY KEY,
+    name NVARCHAR(255) NOT NULL,
+    age  INT NOT NULL
+  );
+`);
+const db = new AppDb({ engine });</code></pre></div>
+
+      <p>From here everything — querying, saving, relationships — is identical regardless of the engine:</p>
+      <pre><code class="language-ts">const nour = db.users.add(Object.assign(new User(), { name: 'Nour', age: 28 }));
 await db.saveChanges();          // INSERT — nour.id is written back
 
 const adults = await db.users.where(x =&gt; x.age.gte(18)).toList();</code></pre>
+      <div class="callout">Only the <strong>engine import + construction</strong> and your <strong>DDL dialect</strong> differ between databases. The <code>DbContext</code>, model, queries, and <code>saveChanges()</code> are portable — Ormit adapts the SQL (<code>RETURNING</code> vs <code>OUTPUT</code> vs <code>insertId</code>, <code>LIMIT/OFFSET</code> vs <code>TOP</code>/<code>OFFSET…FETCH</code>) for you.</div>
 
       <h2 id="modeling">Defining a model <a class="anchor" href="#modeling">#</a></h2>
       <p>Entities are plain classes (POCOs). Configure them fluently in <code>onModelCreating</code>. Precedence is <strong>convention &lt; decorator &lt; fluent</strong> — you only configure what conventions can't infer.</p>
@@ -254,6 +317,23 @@ const db = new AppDb({
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
   <script>
+    // Database picker: swap install + engine-setup snippets, remember the choice.
+    (function () {
+      const DBS = ['sqlite', 'postgres', 'mysql', 'mssql'];
+      const buttons = [...document.querySelectorAll('.db-btn')];
+      const variants = [...document.querySelectorAll('.db-variant')];
+      function setDb(db) {
+        if (!DBS.includes(db)) db = 'sqlite';
+        try { localStorage.setItem('ormit-db', db); } catch (_) {}
+        buttons.forEach((b) => b.classList.toggle('active', b.dataset.pick === db));
+        variants.forEach((v) => { v.hidden = v.dataset.db !== db; });
+      }
+      buttons.forEach((b) => b.addEventListener('click', () => setDb(b.dataset.pick)));
+      let saved = 'sqlite';
+      try { saved = localStorage.getItem('ormit-db') || 'sqlite'; } catch (_) {}
+      setDb(saved);
+    })();
+
     // Scroll-spy: highlight the current section in the sidebar.
     const links = [...document.querySelectorAll('#toc a')];
     const map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));

@@ -77,6 +77,24 @@ const posts = await db.posts.include(x => x.blog).toList();
 console.log(posts[0].blog?.title);      // "Tech"
 ```
 
+**Using another database?** Only the engine line changes — the model, queries, and
+`saveChanges()` are identical:
+
+```ts
+import { PostgresEngine } from '@ormit/postgres';
+const engine = new PostgresEngine('postgres://user:pass@localhost:5432/app');
+
+import { MysqlEngine } from '@ormit/mysql';
+const engine = new MysqlEngine('mysql://user:pass@localhost:3306/app');
+
+import { MssqlEngine } from '@ormit/mssql';
+const engine = new MssqlEngine({ server: 'localhost', user: 'sa', password, database: 'app',
+  options: { encrypt: false, trustServerCertificate: true } });
+```
+
+See [the guide](docs/guide.md#choosing-a-database) (or the interactive picker on the
+[docs site](site/docs.html)) for each dialect's DDL.
+
 ## Querying
 
 Every `Queryable` is immutable — each call returns a new query.

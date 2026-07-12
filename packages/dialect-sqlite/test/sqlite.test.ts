@@ -49,10 +49,10 @@ afterEach(() => engine.close());
 
 describe('@ormit/sqlite · real SQL execution', () => {
   it('inserts with RETURNING and writes generated keys back', async () => {
-    const nour = db.users.add(Object.assign(new User(), { name: 'Nour', age: 28, active: true }));
+    const faraj = db.users.add(Object.assign(new User(), { name: 'faraj', age: 28, active: true }));
     const affected = await db.saveChanges();
     expect(affected).toBe(1);
-    expect(nour.id).toBeGreaterThan(0); // key round-tripped from RETURNING
+    expect(faraj.id).toBeGreaterThan(0); // key round-tripped from RETURNING
   });
 
   it('filters, orders, and pages against SQLite', async () => {

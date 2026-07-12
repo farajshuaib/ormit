@@ -65,7 +65,7 @@ describe('DbContext + Queryable over in-memory engine', () => {
 
   it('saveChanges inserts and writes generated keys back', async () => {
     const { db, engine } = makeDb();
-    const u = db.users.add(Object.assign(new User(), { name: 'Nour', age: 28 }));
+    const u = db.users.add(Object.assign(new User(), { name: 'faraj', age: 28 }));
     const affected = await db.saveChanges();
     expect(affected).toBe(1);
     expect(u.id).toBe(5); // key write-back

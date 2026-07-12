@@ -132,8 +132,8 @@ await engine.exec(`
 const db = new AppDb({ engine });</code></pre></div>
 
       <p>From here everything — querying, saving, relationships — is identical regardless of the engine:</p>
-      <pre><code class="language-ts">const nour = db.users.add(Object.assign(new User(), { name: 'Nour', age: 28 }));
-await db.saveChanges();          // INSERT — nour.id is written back
+      <pre><code class="language-ts">const faraj = db.users.add(Object.assign(new User(), { name: 'faraj', age: 28 }));
+await db.saveChanges();          // INSERT — faraj.id is written back
 
 const adults = await db.users.where(x =&gt; x.age.gte(18)).toList();</code></pre>
       <div class="callout">Only the <strong>engine import + construction</strong> and your <strong>DDL dialect</strong> differ between databases. The <code>DbContext</code>, model, queries, and <code>saveChanges()</code> are portable — Ormit adapts the SQL (<code>RETURNING</code> vs <code>OUTPUT</code> vs <code>insertId</code>, <code>LIMIT/OFFSET</code> vs <code>TOP</code>/<code>OFFSET…FETCH</code>) for you.</div>

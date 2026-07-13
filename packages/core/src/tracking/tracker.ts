@@ -23,11 +23,32 @@ export function scalarEquals(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-/** Copy an entity's scalar (column-backed) properties. */
-export function scalarSnapshot(entity: object): Record<string, unknown> {
+/** Deep structural equality for converted values (which may be arrays/objects). */
+export function structuralEquals(a: unknown, b: unknown): boolean {
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** A snapshot-safe clone: Dates by value, arrays/objects deep-cloned. */
+function cloneValue(value: unknown): unknown {
+  if (value instanceof Date) return new Date(value.getTime());
+  if (value === null || typeof value !== 'object') return value;
+  return structuredClone(value);
+}
+
+/**
+ * Copy an entity's column-backed properties: value-scalars, plus any property
+ * the model declares with a value converter (which may hold an array/object —
+ * it still maps to one column). Everything else is treated as a navigation.
+ */
+export function scalarSnapshot(
+  entity: object,
+  converted?: ReadonlySet<string>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entity)) {
     if (isScalar(value)) out[key] = value instanceof Date ? new Date(value.getTime()) : value;
+    else if (converted?.has(key)) out[key] = cloneValue(value);
   }
   return out;
 }
@@ -35,6 +56,8 @@ export function scalarSnapshot(entity: object): Record<string, unknown> {
 export interface NavigationLoader {
   load(): Promise<void>;
 }
+
+const EMPTY_SET: ReadonlySet<string> = new Set();
 
 export class EntityEntry<T extends object = object> {
   /** @internal — set by the context to enable explicit loading. */
@@ -46,6 +69,8 @@ export class EntityEntry<T extends object = object> {
     readonly entityName: string,
     public state: EntityState,
     public snapshot: Record<string, unknown>,
+    /** Column-backed property names that carry a value converter. */
+    private readonly converted: ReadonlySet<string> = EMPTY_SET,
   ) {}
 
   /** Explicitly load a reference navigation: `entry.reference('author').load()`. */
@@ -57,37 +82,53 @@ export class EntityEntry<T extends object = object> {
     return { load: () => this.loader?.(navigation) ?? Promise.resolve() };
   }
 
-  /** Scalar property names whose value differs from the snapshot. */
+  /** Column property names whose value differs from the snapshot. */
   modifiedProperties(): string[] {
     const current = this.entity as Record<string, unknown>;
     const changed: string[] = [];
     const names = new Set([...Object.keys(this.snapshot), ...Object.keys(current)]);
     for (const name of names) {
       const value = current[name];
-      if (!isScalar(value)) continue; // navigations aren't diffed here
-      if (!scalarEquals(value, this.snapshot[name])) changed.push(name);
+      const isConverted = this.converted.has(name);
+      if (!isScalar(value) && !isConverted) continue; // navigations aren't diffed here
+      const equal = isConverted
+        ? structuralEquals(value, this.snapshot[name])
+        : scalarEquals(value, this.snapshot[name]);
+      if (!equal) changed.push(name);
     }
     return changed;
   }
 
   currentValues(): Record<string, unknown> {
-    return scalarSnapshot(this.entity);
+    return scalarSnapshot(this.entity, this.converted);
   }
 
   /** @internal — reset the baseline after a successful save. */
   refreshSnapshot(): void {
-    this.snapshot = scalarSnapshot(this.entity);
+    this.snapshot = scalarSnapshot(this.entity, this.converted);
   }
 }
 
 export class ChangeTracker {
   private readonly byRef = new Map<object, EntityEntry>();
   private readonly identityMap = new Map<string, EntityEntry>();
+  /** Cached converted-property name sets, keyed by entity name. */
+  private readonly convertedByEntity = new Map<string, ReadonlySet<string>>();
 
   constructor(private readonly model: ModelSnapshot) {}
 
   private keyProps(entityName: string): readonly string[] {
     return this.model.entity(entityName)?.key ?? ['id'];
+  }
+
+  /** Column-backed properties of an entity that declare a value converter. */
+  private convertedProps(entityName: string): ReadonlySet<string> {
+    const cached = this.convertedByEntity.get(entityName);
+    if (cached) return cached;
+    const props = this.model.entity(entityName)?.properties ?? [];
+    const set = new Set(props.filter((p) => p.conversion).map((p) => p.name));
+    this.convertedByEntity.set(entityName, set);
+    return set;
   }
 
   private identityKey(entityName: string, entity: object): string | null {
@@ -121,7 +162,14 @@ export class ChangeTracker {
       existing.state = state;
       return existing as EntityEntry<T>;
     }
-    const entry = new EntityEntry<T>(entity, entityName, state, scalarSnapshot(entity));
+    const converted = this.convertedProps(entityName);
+    const entry = new EntityEntry<T>(
+      entity,
+      entityName,
+      state,
+      scalarSnapshot(entity, converted),
+      converted,
+    );
     this.byRef.set(entity, entry as EntityEntry);
     const key = this.identityKey(entityName, entity);
     if (key) this.identityMap.set(key, entry as EntityEntry);

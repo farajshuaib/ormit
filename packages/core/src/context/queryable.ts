@@ -11,6 +11,7 @@ import {
 import type { GenContext, OrmEngine, Row } from '../contracts/engine.js';
 import { EntityNotFoundError, TranslationError } from '../errors.js';
 import type { ModelSnapshot } from '../metadata/snapshot.js';
+import type { ValueConverterRegistry } from '../metadata/converters.js';
 import { prepareSelect } from '../pipeline/prepare.js';
 import type { Lru } from '../pipeline/cache.js';
 import type { CompiledCommand } from '../contracts/engine.js';
@@ -48,6 +49,8 @@ export interface PlanContext {
   readonly services?: ContextServices;
   /** Plugin-contributed IR→IR passes (e.g. a tenant filter). */
   readonly normalizerPasses?: readonly NormalizerPass[];
+  /** Value converters, applied to filter constants over converted columns. */
+  readonly converters?: ValueConverterRegistry;
 }
 
 /** Cursor into the include tree for ThenInclude resolution. */
@@ -107,15 +110,28 @@ export class Queryable<T extends object> {
     return this.fork({ predicate: merged });
   }
 
-  orderBy(selector: (x: EntityRef<T>) => unknown): Queryable<T> {
+  orderBy(selector: (x: EntityRef<T>) => unknown): OrderedQueryable<T> {
     return this.addOrdering(selector, 'asc');
   }
-  orderByDescending(selector: (x: EntityRef<T>) => unknown): Queryable<T> {
+  orderByDescending(selector: (x: EntityRef<T>) => unknown): OrderedQueryable<T> {
     return this.addOrdering(selector, 'desc');
   }
-  private addOrdering(sel: (x: EntityRef<T>) => unknown, direction: Ordering['direction']) {
+  /** Append an ordering and re-type the result as ordered (unlocks thenBy). */
+  protected addOrdering(
+    sel: (x: EntityRef<T>) => unknown,
+    direction: Ordering['direction'],
+  ): OrderedQueryable<T> {
+    this.assertComposable();
     const ordering: Ordering = { path: recordPath(sel), direction };
-    return this.fork({ orderings: [...this.ir.orderings, ordering] });
+    return new OrderedQueryable<T>(
+      { ...this.ir, orderings: [...this.ir.orderings, ordering] },
+      this.engine,
+      this.genCtx,
+      this.materialize,
+      this.plan,
+      undefined,
+      this.includeCursor,
+    );
   }
 
   skip(n: number): Queryable<T> {
@@ -326,7 +342,25 @@ export class Queryable<T extends object> {
       this.plan.snapshot,
       { ignoreQueryFilters: this.plan.options.ignoreQueryFilters },
       this.plan.normalizerPasses,
+      this.plan.converters,
     );
+  }
+}
+
+/**
+ * A {@link Queryable} that already carries at least one ordering. Returned by
+ * `orderBy`/`orderByDescending`, it additionally exposes `thenBy`/`thenByDescending`
+ * for secondary sort keys — mirroring EF Core's `IOrderedQueryable<T>`, so a
+ * `thenBy` before an `orderBy` doesn't type-check.
+ */
+export class OrderedQueryable<T extends object> extends Queryable<T> {
+  /** Add a secondary ascending sort key, applied after the previous orderings. */
+  thenBy(selector: (x: EntityRef<T>) => unknown): OrderedQueryable<T> {
+    return this.addOrdering(selector, 'asc');
+  }
+  /** Add a secondary descending sort key, applied after the previous orderings. */
+  thenByDescending(selector: (x: EntityRef<T>) => unknown): OrderedQueryable<T> {
+    return this.addOrdering(selector, 'desc');
   }
 }
 

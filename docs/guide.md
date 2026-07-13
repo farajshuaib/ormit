@@ -119,10 +119,40 @@ Property options: `hasColumnName`, `hasType`, `hasMaxLength`, `isRequired`,
 `hasComment`. Prefer decorators? `@ormit/decorators` (`@entity/@key/@column/
 @hasOne/@hasMany`) replays into the same builder via `applyDecorators(m, [...])`.
 
+### Value converters
+
+`hasConversion('name')` maps a property to a column through a named converter —
+`toProvider` on write and in `where` filters, `fromProvider` on read. Only the
+name lives in the snapshot (migrations stay byte-stable); the functions are
+supplied at runtime through `DbContextOptions.converters`:
+
+```ts
+import { jsonConverter, isoDateConverter, booleanNumberConverter, defineConverter } from '@ormit/core';
+
+m.entity(Account, e => {
+  e.property(x => x.tags).hasConversion('json');      // string[] ⇆ JSON text
+  e.property(x => x.createdAt).hasConversion('iso');  // Date     ⇆ ISO-8601 text
+  e.property(x => x.premium).hasConversion('bool');   // boolean  ⇆ 0/1
+});
+
+const db = new AppDb({
+  engine,
+  converters: {
+    json: jsonConverter, iso: isoDateConverter, bool: booleanNumberConverter,
+    // custom, fully typed on both sides:
+    role: defineConverter<Role, number>({ toProvider: r => r.valueOf(), fromProvider: n => n as Role }),
+  },
+});
+```
+
+`null` passes through untouched; a property naming an unregistered converter
+throws at context construction. The stored type is the *provider* type — model
+the column accordingly.
+
 ## Querying
 
-- **Filter/shape:** `where`, `orderBy(Descending)`, `skip`, `take`, `distinct`,
-  `select(x => ({ … }))`.
+- **Filter/shape:** `where`, `orderBy(Descending)` then `thenBy(Descending)` for
+  secondary keys, `skip`, `take`, `distinct`, `select(x => ({ … }))`.
 - **Operators:** `eq/neq/in/isNull`, `gt/gte/lt/lte/between`, `startsWith/
   endsWith/contains/like/toLower/toUpper`, and to-many `any/all/count`.
 - **Terminals:** `toList/first(OrNull)/single(OrNull)/count/any/sum/avg/min/max/

@@ -228,6 +228,48 @@ class AppDb extends DbContext {
   }
 }</code></pre>
 
+      <h3>Value converters</h3>
+      <p><code>hasConversion('name')</code> maps a property to a column through a named converter,
+      applied at the boundary: <code>toProvider</code> on write and in <code>where</code> filters,
+      <code>fromProvider</code> when materializing. The <em>name</em> is all that's stored in the
+      snapshot, so migrations stay byte-stable; the functions are supplied at runtime via
+      <code>DbContextOptions.converters</code>.</p>
+      <pre><code class="language-ts">import { jsonConverter, booleanNumberConverter, isoDateConverter, defineConverter } from '@ormit/core';
+
+class Account { id!: number; tags!: string[]; createdAt!: Date; premium!: boolean; role!: Role; }
+
+// Model: name the converter each property uses.
+m.entity(Account, e =&gt; {
+  e.hasKey('id');
+  e.property(x =&gt; x.tags).hasConversion('json');       // string[]  ⇆ JSON text
+  e.property(x =&gt; x.createdAt).hasConversion('iso');    // Date      ⇆ ISO-8601 text
+  e.property(x =&gt; x.premium).hasConversion('bool');     // boolean   ⇆ 0/1
+  e.property(x =&gt; x.role).hasConversion('role');        // enum      ⇆ smallint (custom)
+});
+
+// Runtime: register the functions. Built-ins ship for the common cases; author
+// your own with defineConverter (fully typed on both sides).
+const db = new AppDb({
+  engine,
+  converters: {
+    json: jsonConverter,
+    iso: isoDateConverter,
+    bool: booleanNumberConverter,
+    role: defineConverter&lt;Role, number&gt;({
+      toProvider: (r) =&gt; r.valueOf(),
+      fromProvider: (n) =&gt; n as Role,
+    }),
+  },
+});
+
+// Round-trips as model values; filters accept model values too.
+account.tags = ['a', 'b'];
+await db.saveChanges();                                  // stores '["a","b"]'
+await db.accounts.where(x =&gt; x.premium.eq(true)).toList(); // compares against 1</code></pre>
+      <div class="callout"><code>null</code> passes through untouched. A property naming a converter that isn't
+      registered throws at context construction. The column's <em>stored</em> type is the provider type —
+      model it accordingly (e.g. <code>hasType</code> / the migration column type).</div>
+
       <h2 id="querying">Querying <a class="anchor" href="#querying">#</a></h2>
       <p>Every <code>Queryable</code> is immutable — each call returns a new query. The lambda runs once at build time against a typed Proxy that records an IR.</p>
       <pre><code class="language-ts">const rows = await db.users
@@ -245,7 +287,15 @@ class AppDb extends DbContext {
         <tr><td>To-many nav</td><td><code>any(pred?)</code> <code>all(pred)</code> <code>count()</code> → EXISTS / subquery</td></tr>
       </table>
       <h3>Shaping</h3>
-      <p>Chain <code>where</code> (ANDed), <code>orderBy</code>/<code>orderByDescending</code> (call again for secondary sorts), <code>skip</code>/<code>take</code>, <code>distinct()</code>, and <code>select(x =&gt; ({ … }))</code> projections.</p>
+      <p>Chain <code>where</code> (ANDed), <code>orderBy</code>/<code>orderByDescending</code> then
+      <code>thenBy</code>/<code>thenByDescending</code> for secondary sort keys,
+      <code>skip</code>/<code>take</code>, <code>distinct()</code>, and
+      <code>select(x =&gt; ({ … }))</code> projections.</p>
+      <pre><code class="language-ts">const roster = await db.people
+  .orderBy(x =&gt; x.team)
+  .thenByDescending(x =&gt; x.age)   // only available after orderBy (like EF's IOrderedQueryable)
+  .thenBy(x =&gt; x.name)
+  .toList();</code></pre>
       <h3>Terminals</h3>
       <p><code>toList</code>, <code>first</code>/<code>firstOrNull</code>, <code>single</code>/<code>singleOrNull</code>, <code>count</code>, <code>any</code>, <code>sum</code>/<code>avg</code>/<code>min</code>/<code>max</code>, <code>toPage(page, size)</code>.</p>
       <h3>Raw SQL &amp; tracking</h3>

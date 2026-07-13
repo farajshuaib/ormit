@@ -10,6 +10,7 @@ import type { BoolExprNode, IncludeNode, SelectExpr } from '../ir/nodes.js';
 import type { Row } from '../contracts/engine.js';
 import type { ModelSnapshot } from '../metadata/snapshot.js';
 import type { EntitySnapshot } from '../metadata/types.js';
+import { entityConverters, type ValueConverterRegistry } from '../metadata/converters.js';
 
 export interface LoadInfo {
   readonly entity: string;
@@ -23,6 +24,8 @@ export interface ContextServices {
   runSelect(select: SelectExpr): Promise<readonly Row[]>;
   /** Observability hook (drives the N+1 detector in diagnostics mode). */
   onLoad?(info: LoadInfo): void;
+  /** Value converters applied when materializing loaded rows. */
+  readonly converters?: ValueConverterRegistry;
 }
 
 export async function loadIncludes(
@@ -51,7 +54,7 @@ async function loadOne(
   const rows = linkValues.length
     ? await services.runSelect(inSelect(include, matchProp, linkValues))
     : [];
-  const targets = rows.map((r) => materializePlain(r, targetMeta));
+  const targets = rows.map((r) => materializePlain(r, targetMeta, services.converters));
 
   services.onLoad?.({
     entity: include.target,
@@ -92,11 +95,20 @@ function inSelect(include: IncludeNode, keyProp: string, values: readonly unknow
   return { kind: 'select', entity: include.target, predicate, orderings: [] };
 }
 
-function materializePlain(row: Row, entity: EntitySnapshot): object {
+function materializePlain(
+  row: Row,
+  entity: EntitySnapshot,
+  registry: ValueConverterRegistry | undefined,
+): object {
   const reverse = new Map<string, string>();
   for (const p of entity.properties) if (p.column !== p.name) reverse.set(p.column, p.name);
+  const convs = entityConverters(entity.properties, registry);
   const out: Record<string, unknown> = {};
-  for (const [column, value] of Object.entries(row)) out[reverse.get(column) ?? column] = value;
+  for (const [column, value] of Object.entries(row)) {
+    const prop = reverse.get(column) ?? column;
+    const converter = value === null || value === undefined ? undefined : convs.get(prop);
+    out[prop] = converter ? converter.fromProvider(value) : value;
+  }
   return out;
 }
 

@@ -12,6 +12,15 @@ export {
 } from './builder.js';
 export { ModelSnapshot, type EntityMeta } from './snapshot.js';
 export {
+  defineConverter,
+  jsonConverter,
+  booleanNumberConverter,
+  isoDateConverter,
+  entityConverters,
+  type ValueConverter,
+  type ValueConverterRegistry,
+} from './converters.js';
+export {
   serializeSnapshot,
   deserializeSnapshot,
   stableStringify,

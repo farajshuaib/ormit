@@ -4,6 +4,11 @@ import type { BoolExprNode, IncludeNode, SelectExpr } from '../ir/nodes.js';
 import { irHash } from '../ir/hash.js';
 import { ModelBuilder, ModelSnapshot, type Ctor, type EntityMeta } from './model.js';
 import { tableNameFor } from '../metadata/index.js';
+import {
+  entityConverters,
+  type ValueConverter,
+  type ValueConverterRegistry,
+} from '../metadata/converters.js';
 import { Queryable } from './queryable.js';
 import { Lru } from '../pipeline/cache.js';
 import { prepareSelect } from '../pipeline/prepare.js';
@@ -32,6 +37,12 @@ export interface DbContextOptions {
   readonly onWarning?: (warning: OrmWarning) => void;
   /** Plugins extending the model, pipeline, and lifecycle. */
   readonly plugins?: readonly OrmPlugin[];
+  /**
+   * Value converters keyed by the name given to `hasConversion(name)`. Each is
+   * applied at the read/write boundary: `toProvider` on save and in filters,
+   * `fromProvider` on materialization.
+   */
+  readonly converters?: Readonly<Record<string, ValueConverter>>;
 }
 
 /** Number of individual single-entity loads before an N+1 is suspected. */
@@ -47,6 +58,8 @@ interface SetContext<T extends object> {
   services: ContextServices;
   normalizerPasses: readonly NormalizerPass[];
   reverseColumns: ReadonlyMap<string, string>;
+  /** property name → converter, for materializing this entity's rows. */
+  readConverters: ReadonlyMap<string, ValueConverter>;
 }
 
 export class DbSet<T extends object> extends Queryable<T> {
@@ -63,7 +76,8 @@ export class DbSet<T extends object> extends Queryable<T> {
       (row) => {
         const entity = Object.create(ctor.prototype) as Record<string, unknown>;
         for (const [column, value] of Object.entries(row)) {
-          entity[ctx.reverseColumns.get(column) ?? column] = value;
+          const prop = ctx.reverseColumns.get(column) ?? column;
+          entity[prop] = fromDb(value, prop, ctx.readConverters);
         }
         return entity as T;
       },
@@ -75,6 +89,7 @@ export class DbSet<T extends object> extends Queryable<T> {
         entityName: ctx.meta.name,
         services: ctx.services,
         normalizerPasses: ctx.normalizerPasses,
+        ...(ctx.services.converters ? { converters: ctx.services.converters } : {}),
       },
     );
     this.meta = ctx.meta;
@@ -130,6 +145,7 @@ export abstract class DbContext {
   private readonly warned = new Set<string>();
   private readonly plugins: readonly OrmPlugin[];
   private readonly pluginPasses: readonly NormalizerPass[];
+  private readonly converters: ValueConverterRegistry;
 
   constructor(options: DbContextOptions) {
     this.engine = options.engine;
@@ -137,18 +153,35 @@ export abstract class DbContext {
     if (options.onWarning) this.onWarning = options.onWarning;
     this.plugins = options.plugins ?? [];
     this.pluginPasses = this.plugins.flatMap((p) => p.normalizerPasses ?? []);
+    this.converters = new Map(Object.entries(options.converters ?? {}));
 
     const builder = new ModelBuilder();
     this.onModelCreating(builder);
     for (const plugin of this.plugins) plugin.configureModel?.(builder);
     this.modelSnapshot = ModelSnapshot.build(builder);
+    this.assertConvertersRegistered();
 
     this.tracker = new ChangeTracker(this.modelSnapshot);
     this.services = {
       snapshot: this.modelSnapshot,
       runSelect: (select) => this.runSelect(select),
       onLoad: (info) => this.observeLoad(info),
+      converters: this.converters,
     };
+  }
+
+  /** Fail fast if a property references a converter name that wasn't supplied. */
+  private assertConvertersRegistered(): void {
+    for (const entity of this.modelSnapshot.entities) {
+      for (const p of entity.properties) {
+        if (p.conversion && !this.converters.has(p.conversion)) {
+          throw new TranslationError(
+            `Property '${entity.name}.${p.name}' uses converter '${p.conversion}', ` +
+              `but no such converter was provided in DbContextOptions.converters.`,
+          );
+        }
+      }
+    }
   }
 
   protected abstract onModelCreating(model: ModelBuilder): void;
@@ -176,6 +209,7 @@ export abstract class DbContext {
       services: this.services,
       normalizerPasses: this.pluginPasses,
       reverseColumns,
+      readConverters: entityConverters(configured?.properties ?? [], this.converters),
     });
     this.sets.set(ctor as Ctor<object>, set as DbSet<object>);
     return set;
@@ -227,7 +261,7 @@ export abstract class DbContext {
 
   /** Compile + run a select through the pipeline (used by eager loading). */
   private async runSelect(select: SelectExpr): Promise<readonly Row[]> {
-    const prepared = prepareSelect(select, this.modelSnapshot, {}, this.pluginPasses);
+    const prepared = prepareSelect(select, this.modelSnapshot, {}, this.pluginPasses, this.converters);
     const genCtx: GenContext = { tables: this.modelSnapshot.tables };
     const cmd = this.engine.generator.compileSelect(prepared, genCtx);
     return this.engine.executor.query({ ...cmd, irHash: cmd.irHash || irHash(prepared) });
@@ -279,7 +313,7 @@ export abstract class DbContext {
     this.tracker.detectChanges();
     if (!this.tracker.hasChanges()) return 0;
 
-    const steps = planSave(this.tracker, this.modelSnapshot);
+    const steps = planSave(this.tracker, this.modelSnapshot, this.converters);
     const genCtx: GenContext = { tables: this.modelSnapshot.tables };
     let affected = 0;
 
@@ -364,4 +398,15 @@ function writeBack(entity: object, row: Row, reverseColumns: ReadonlyMap<string,
   for (const [column, value] of Object.entries(row)) {
     target[reverseColumns.get(column) ?? column] = value;
   }
+}
+
+/** Apply a property's converter on the way out of the database (null passes through). */
+function fromDb(
+  value: unknown,
+  prop: string,
+  converters: ReadonlyMap<string, ValueConverter>,
+): unknown {
+  if (value === null || value === undefined || converters.size === 0) return value;
+  const converter = converters.get(prop);
+  return converter ? converter.fromProvider(value) : value;
 }

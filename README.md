@@ -102,7 +102,7 @@ Every `Queryable` is immutable — each call returns a new query.
 ```ts
 db.users
   .where(x => x.age.between(18, 65).and(x.email.isNotNull()))
-  .orderByDescending(x => x.createdAt)
+  .orderBy(x => x.team).thenByDescending(x => x.createdAt)   // secondary sort keys
   .skip(20).take(10)
   .select(x => ({ id: x.id, name: x.name.toLower() }))   // projection
 ```
@@ -110,6 +110,8 @@ db.users
 - **Operators:** `eq/neq/in/isNull/isNotNull`, `gt/gte/lt/lte/between`,
   `startsWith/endsWith/contains/like/toLower/toUpper`, and on to-many navigations
   `any(pred?)/all(pred)/count()`.
+- **Ordering:** `orderBy`/`orderByDescending`, then `thenBy`/`thenByDescending` for
+  secondary keys (only available after an `orderBy`, like EF's `IOrderedQueryable`).
 - **Terminals:** `toList`, `first`/`firstOrNull`, `single`/`singleOrNull`,
   `count`, `any`, `sum`/`avg`/`min`/`max`, `toPage(page, size)`.
 - **Loading:** `include(x => x.posts).thenInclude(p => p.comments)` (split queries
@@ -138,6 +140,22 @@ await db.database.transaction(async () => {  // ambient transaction across saves
 
 Add `.isConcurrencyToken()` to a property (e.g. a `version`/rowversion) and a
 stale update throws `ConcurrencyError`.
+
+### Value converters
+
+Map a rich property to a column with `hasConversion('name')` and register the
+converter at runtime — applied on write, on read, and in `where` filters:
+
+```ts
+import { jsonConverter, DbContext } from '@ormit/core';
+
+m.entity(Account, e => e.property(x => x.tags).hasConversion('json')); // string[] ⇆ JSON text
+const db = new AppDb({ engine, converters: { json: jsonConverter } });
+```
+
+Built-ins: `jsonConverter`, `isoDateConverter`, `booleanNumberConverter`; author
+your own (fully typed) with `defineConverter`. Only the converter *name* is stored
+in the snapshot, so migrations stay byte-stable.
 
 ## Migrations
 

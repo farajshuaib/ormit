@@ -19,7 +19,7 @@ export * from './metadata/index.js';
 export * from './migrations/operations.js';
 export * from './pipeline/index.js';
 export * from './tracking/index.js';
-export { Queryable, type Page } from './context/queryable.js';
+export { Queryable, OrderedQueryable, type Page } from './context/queryable.js';
 export {
   DbContext,
   DbSet,

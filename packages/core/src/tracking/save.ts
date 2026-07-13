@@ -10,7 +10,19 @@
 import type { BoolExprNode, WriteOp } from '../ir/nodes.js';
 import type { ModelSnapshot } from '../metadata/snapshot.js';
 import type { EntitySnapshot } from '../metadata/types.js';
+import {
+  entityConverters,
+  type ValueConverter,
+  type ValueConverterRegistry,
+} from '../metadata/converters.js';
 import type { ChangeTracker, EntityEntry } from './tracker.js';
+
+/** Apply a property's converter on the way to the database (null passes through). */
+function toDb(value: unknown, prop: string, converters: Map<string, ValueConverter>): unknown {
+  if (value === null || value === undefined || converters.size === 0) return value;
+  const converter = converters.get(prop);
+  return converter ? converter.toProvider(value) : value;
+}
 
 export interface SaveStep {
   readonly op: WriteOp;
@@ -21,7 +33,11 @@ export interface SaveStep {
   readonly concurrency: boolean;
 }
 
-export function planSave(tracker: ChangeTracker, model: ModelSnapshot): SaveStep[] {
+export function planSave(
+  tracker: ChangeTracker,
+  model: ModelSnapshot,
+  converters?: ValueConverterRegistry,
+): SaveStep[] {
   const order = topoSort(model);
   const rank = new Map(order.map((name, i) => [name, i] as const));
   const rankOf = (name: string) => rank.get(name) ?? order.length;
@@ -35,12 +51,12 @@ export function planSave(tracker: ChangeTracker, model: ModelSnapshot): SaveStep
     .sort((a, b) => rankOf(b.entityName) - rankOf(a.entityName)); // children first
 
   const steps: SaveStep[] = [];
-  for (const entry of inserts) steps.push(buildInsert(entry, model));
-  for (const entry of updates) steps.push(buildUpdate(entry, model));
+  for (const entry of inserts) steps.push(buildInsert(entry, model, converters));
+  for (const entry of updates) steps.push(buildUpdate(entry, model, converters));
   for (const entry of deletes) {
     // Cascade to dependents first (child rows before the principal row).
-    for (const step of cascadeFor(entry, model)) steps.push(step);
-    steps.push(buildDelete(entry, model));
+    for (const step of cascadeFor(entry, model, converters)) steps.push(step);
+    steps.push(buildDelete(entry, model, converters));
   }
   return steps;
 }
@@ -49,12 +65,17 @@ export function planSave(tracker: ChangeTracker, model: ModelSnapshot): SaveStep
  * Dependent-side effects of deleting a principal: `cascade` bulk-deletes child
  * rows, `setNull` clears their FK. `restrict`/`noAction` defer to the database.
  */
-function cascadeFor(entry: EntityEntry, model: ModelSnapshot): SaveStep[] {
+function cascadeFor(
+  entry: EntityEntry,
+  model: ModelSnapshot,
+  registry: ValueConverterRegistry | undefined,
+): SaveStep[] {
   const entity = meta(model, entry.entityName);
   if (!entity) return [];
   const principalKey = keyProps(entity)[0];
   if (!principalKey) return [];
-  const keyValue = entry.currentValues()[principalKey];
+  const convs = entityConverters(entity.properties, registry);
+  const keyValue = toDb(entry.currentValues()[principalKey], principalKey, convs);
   const steps: SaveStep[] = [];
 
   for (const nav of entity.navigations) {
@@ -115,12 +136,17 @@ function eqAll(pairs: readonly (readonly [string, unknown])[]): BoolExprNode {
   return nodes.length === 1 ? nodes[0]! : { kind: 'logical', op: 'and', operands: nodes };
 }
 
-function buildInsert(entry: EntityEntry, model: ModelSnapshot): SaveStep {
+function buildInsert(
+  entry: EntityEntry,
+  model: ModelSnapshot,
+  registry: ValueConverterRegistry | undefined,
+): SaveStep {
   const entity = meta(model, entry.entityName);
   const cols = columnMap(entity);
+  const convs = entityConverters(entity?.properties ?? [], registry);
   const values: Record<string, unknown> = {};
   for (const [prop, value] of Object.entries(entry.currentValues())) {
-    values[col(cols, prop)] = value;
+    values[col(cols, prop)] = toDb(value, prop, convs);
   }
   return {
     op: { kind: 'insert', entity: entry.entityName, values },
@@ -130,18 +156,28 @@ function buildInsert(entry: EntityEntry, model: ModelSnapshot): SaveStep {
   };
 }
 
-function buildUpdate(entry: EntityEntry, model: ModelSnapshot): SaveStep {
+function buildUpdate(
+  entry: EntityEntry,
+  model: ModelSnapshot,
+  registry: ValueConverterRegistry | undefined,
+): SaveStep {
   const entity = meta(model, entry.entityName);
   const cols = columnMap(entity);
+  const convs = entityConverters(entity?.properties ?? [], registry);
   const keys = new Set(keyProps(entity));
   const current = entry.currentValues();
 
   const values: Record<string, unknown> = {};
   for (const prop of entry.modifiedProperties()) {
-    if (!keys.has(prop)) values[col(cols, prop)] = current[prop];
+    if (!keys.has(prop)) values[col(cols, prop)] = toDb(current[prop], prop, convs);
   }
   return {
-    op: { kind: 'update', entity: entry.entityName, values, predicate: rowPredicate(entry, model) },
+    op: {
+      kind: 'update',
+      entity: entry.entityName,
+      values,
+      predicate: rowPredicate(entry, model, registry),
+    },
     entry,
     reverseColumns: reverseColumnMap(entity),
     // A tracked update must hit its row; zero rows ⇒ it vanished/changed.
@@ -149,10 +185,18 @@ function buildUpdate(entry: EntityEntry, model: ModelSnapshot): SaveStep {
   };
 }
 
-function buildDelete(entry: EntityEntry, model: ModelSnapshot): SaveStep {
+function buildDelete(
+  entry: EntityEntry,
+  model: ModelSnapshot,
+  registry: ValueConverterRegistry | undefined,
+): SaveStep {
   const entity = meta(model, entry.entityName);
   return {
-    op: { kind: 'delete', entity: entry.entityName, predicate: rowPredicate(entry, model) },
+    op: {
+      kind: 'delete',
+      entity: entry.entityName,
+      predicate: rowPredicate(entry, model, registry),
+    },
     entry,
     reverseColumns: reverseColumnMap(entity),
     concurrency: true,
@@ -160,16 +204,21 @@ function buildDelete(entry: EntityEntry, model: ModelSnapshot): SaveStep {
 }
 
 /** key columns = current values, AND concurrency token = its ORIGINAL value. */
-function rowPredicate(entry: EntityEntry, model: ModelSnapshot): BoolExprNode {
+function rowPredicate(
+  entry: EntityEntry,
+  model: ModelSnapshot,
+  registry: ValueConverterRegistry | undefined,
+): BoolExprNode {
   const entity = meta(model, entry.entityName);
   const cols = columnMap(entity);
+  const convs = entityConverters(entity?.properties ?? [], registry);
   const current = entry.currentValues();
   const pairs: (readonly [string, unknown])[] = keyProps(entity).map((k) => [
     col(cols, k),
-    current[k],
+    toDb(current[k], k, convs),
   ]);
   const token = concurrencyProp(entity);
-  if (token) pairs.push([col(cols, token), entry.snapshot[token]]);
+  if (token) pairs.push([col(cols, token), toDb(entry.snapshot[token], token, convs)]);
   return eqAll(pairs);
 }
 

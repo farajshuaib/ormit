@@ -301,6 +301,11 @@ const { snapshot, changed } = repairSnapshot(model, readFileSync('model.snapshot
 if (changed) writeFileSync('model.snapshot.json', snapshot);
 ```
 
+See [`examples/migration-first`](../examples/migration-first) for this whole
+workflow wired up and runnable end to end against SQLite, including the CLI
+commands (`migrations:add`, `db:update`, `db:script`, `migrations:repair`) and a
+second migration that adds a column to prove schema evolution preserves data.
+
 ## CLI
 
 `@ormit/cli` is the injectable core behind the `ormit` command — pass your engine,

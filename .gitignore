@@ -4,3 +4,7 @@ dist/
 coverage/
 .idea/
 .DS_Store
+
+# Example apps generate a real SQLite file at runtime — the migrations and
+# committed snapshot are checked in, the database itself is not.
+examples/*/data/

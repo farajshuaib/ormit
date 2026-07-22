@@ -1,0 +1,25 @@
+{
+  "name": "ormit-example-migration-first",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "migrations:add": "tsx src/cli.ts migrations add",
+    "migrations:list": "tsx src/cli.ts migrations list",
+    "migrations:repair": "tsx src/cli.ts migrations repair",
+    "db:update": "tsx src/cli.ts database update",
+    "db:down": "tsx src/cli.ts database update --down",
+    "db:script": "tsx src/cli.ts script",
+    "seed": "tsx src/seed.ts",
+    "reset": "rm -rf data migrations model.snapshot.json"
+  },
+  "dependencies": {
+    "@ormit/cli": "workspace:*",
+    "@ormit/core": "workspace:*",
+    "@ormit/migrations": "workspace:*",
+    "@ormit/sqlite": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

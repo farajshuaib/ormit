@@ -112,7 +112,7 @@ await db.saveChanges(); // atomic · key write-back</code></pre>
           <h3>Write LINQ, get SQL</h3>
           <p>Compose immutable queries with a fluent, fully-typed API. Every operator maps to real SQL; anything untranslatable throws at build time, never silently.</p>
           <ul>
-            <li><strong>Operators</strong> — eq/in/between, startsWith/contains/like, any/all/count on collections.</li>
+            <li><strong>Operators</strong> — eq/in/between, startsWith/contains/like/toLower/toUpper.</li>
             <li><strong>Terminals</strong> — toList, first, single, count, sum/avg/min/max, toPage.</li>
             <li><strong>Escape hatch</strong> — parameterized <code>fromSql</code> tagged templates.</li>
           </ul>
@@ -120,8 +120,7 @@ await db.saveChanges(); // atomic · key write-back</code></pre>
         <div class="window">
           <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="name">query.ts</span></div>
           <pre><code class="language-ts">const page = await db.orders
-  .where(x =&gt; x.total.gte(100))
-  .where(x =&gt; x.items.any(i =&gt; i.sku.eq('A1')))
+  .where(x =&gt; x.total.gte(100).and(x.status.neq('cancelled')))
   .orderByDescending(x =&gt; x.createdAt)
   .select(x =&gt; ({ id: x.id, total: x.total }))
   .toPage(1, 20);</code></pre>

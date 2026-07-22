@@ -284,8 +284,8 @@ await db.accounts.where(x =&gt; x.premium.eq(true)).toList(); // compares agains
         <tr><td>All</td><td><code>eq</code> <code>neq</code> <code>in</code> <code>isNull</code> <code>isNotNull</code></td></tr>
         <tr><td>Ordered</td><td><code>gt</code> <code>gte</code> <code>lt</code> <code>lte</code> <code>between</code></td></tr>
         <tr><td>String</td><td><code>startsWith</code> <code>endsWith</code> <code>contains</code> <code>like</code> <code>toLower</code> <code>toUpper</code></td></tr>
-        <tr><td>To-many nav</td><td><code>any(pred?)</code> <code>all(pred)</code> <code>count()</code> → EXISTS / subquery</td></tr>
       </table>
+      <div class="callout"><code>any(pred?)</code>/<code>all(pred)</code>/<code>count()</code> on a to-many navigation record into the expression tree today, but the shipping SQL generator doesn't yet lower that into a correlated subquery — calling one throws a clear <code>TranslationError</code> at query-compile time rather than silently misbehaving. Track this on the project's issue tracker before relying on it.</div>
       <h3>Shaping</h3>
       <p>Chain <code>where</code> (ANDed), <code>orderBy</code>/<code>orderByDescending</code> then
       <code>thenBy</code>/<code>thenByDescending</code> for secondary sort keys,
@@ -583,6 +583,173 @@ await db.saveChanges();
 expect(engine.rows('users')).toHaveLength(3);
 expect(engine.log.length).toBeGreaterThan(0);   // every compiled command is logged</code></pre>
       <div class="callout">The in-memory engine is the same seam the dialects implement, so your queries and change tracking behave identically — it's ideal for fast unit tests, with Testcontainers reserved for dialect compatibility.</div>
+
+      <h2 id="recipe-multitenant">Recipe: Multi-tenant SaaS <a class="anchor" href="#recipe-multitenant">#</a></h2>
+      <p>Scope every table by a tenant discriminator column, resolved <em>per-operation</em> from <code>AsyncLocalStorage</code> — the tenant id is never cached on the plugin instance, so one pooled context safely serves requests for different tenants.</p>
+      <pre><code class="language-ts">import { AsyncLocalStorage } from 'node:async_hooks';
+import { multitenancy } from '@ormit/plugins';
+
+const tenantContext = new AsyncLocalStorage&lt;string&gt;();
+
+const db = new AppDb({
+  engine,
+  plugins: [multitenancy({ tenant: () =&gt; tenantContext.getStore()! })],  // default column: tenantId
+});</code></pre>
+      <p>Resolve the tenant once per request, then run the rest of the handler inside it:</p>
+      <pre><code class="language-ts">app.use((req, res, next) =&gt; {
+  const tenantId = req.header('x-tenant-id')!;
+  tenantContext.run(tenantId, next);
+});
+
+app.get('/projects', async (req, res) =&gt; {
+  res.json(await db.projects.toList());   // WHERE "tenantId" = '&lt;current tenant&gt;' — automatic
+});
+
+app.post('/projects', async (req, res) =&gt; {
+  db.projects.add(Object.assign(new Project(), req.body));
+  await db.saveChanges();                  // tenantId stamped on the insert automatically
+  res.sendStatus(201);
+});</code></pre>
+      <div class="callout">Scope only some entities with <code>multitenancy({ tenant, entities: [Project, Invoice] })</code> — anything not listed is left untouched. Pair this with <code>@ormit/adapters</code>' <code>ormitExpress()</code> for the per-request context itself (see <a href="#adapters">Web adapters</a>).</div>
+
+      <h2 id="recipe-soft-delete">Recipe: Soft delete &amp; restore <a class="anchor" href="#recipe-soft-delete">#</a></h2>
+      <p>Model the flag column normally, then let the plugin rewrite deletes into updates and filter every read:</p>
+      <pre><code class="language-ts">import { softDelete } from '@ormit/plugins';
+
+m.entity(Post, e =&gt; {
+  e.toTable('posts').hasKey('id');
+  e.property(x =&gt; x.isDeleted).hasType('boolean').hasDefault(false);
+});
+
+const db = new AppDb({ engine, plugins: [softDelete()] });  // default column: isDeleted</code></pre>
+      <pre><code class="language-ts">db.posts.remove(post);
+await db.saveChanges();                    // UPDATE posts SET "isDeleted" = true — no row is dropped
+
+const visible = await db.posts.toList();                         // isDeleted = false, automatically
+const everything = await db.posts.ignoreQueryFilters().toList();  // bypass the filter, see trashed rows too</code></pre>
+      <p>The plugin only rewrites deletes — restoring is a normal tracked update through <code>ignoreQueryFilters()</code>:</p>
+      <pre><code class="language-ts">const trashed = await db.posts.ignoreQueryFilters().where(x =&gt; x.id.eq(postId)).single();
+trashed.isDeleted = false;
+await db.saveChanges();                    // UPDATE posts SET "isDeleted" = false</code></pre>
+      <div class="callout">Scope with <code>softDelete({ entities: [Post, Comment] })</code> — omit it and every entity declared in <code>onModelCreating</code> gets the filter. Pass <code>column</code> to use something other than <code>isDeleted</code>.</div>
+
+      <h2 id="recipe-transactions">Recipe: Transactions &amp; concurrency <a class="anchor" href="#recipe-transactions">#</a></h2>
+      <p>Wrap multiple saves in one atomic unit, and let a concurrency token protect against a stale write clobbering someone else's change.</p>
+      <pre><code class="language-ts">m.entity(Account, e =&gt; {
+  e.toTable('accounts').hasKey('id');
+  e.property(x =&gt; x.version).isConcurrencyToken();  // bumped by your app, a trigger, or rowversion
+});</code></pre>
+      <pre><code class="language-ts">await db.database.transaction(async () =&gt; {
+  const from = await db.accounts.find(fromId);
+  const to = await db.accounts.find(toId);
+  from!.balance -= amount;
+  to!.balance += amount;
+  await db.saveChanges();   // both UPDATEs commit together, or neither does
+});</code></pre>
+      <p>A tracked update or delete that matches zero rows — because the row changed or vanished since it was read — throws <code>ConcurrencyError</code> instead of silently doing nothing:</p>
+      <pre><code class="language-ts">import { ConcurrencyError } from '@ormit/core';
+
+try {
+  await db.saveChanges();
+} catch (err) {
+  if (err instanceof ConcurrencyError) {
+    console.warn(`stale write on ${err.entries.length} entit${err.entries.length === 1 ? 'y' : 'ies'}`);
+    // reload the affected entries and retry, or surface a conflict to the caller
+  } else {
+    throw err;
+  }
+}</code></pre>
+      <div class="callout">Nested <code>database.transaction()</code> calls join the ambient transaction (via <code>AsyncLocalStorage</code>) instead of nesting — only the outermost call actually opens and commits a database transaction.</div>
+
+      <h2 id="recipe-queries">Recipe: Rich queries <a class="anchor" href="#recipe-queries">#</a></h2>
+      <p>Compose filters, ordering, projection, and pagination — every call forks an immutable query, so you can build one up conditionally with plain <code>if</code>s and no spooky mutation.</p>
+      <pre><code class="language-ts">function search(db: AppDb, opts: { q?: string; minAge?: number; sort: 'name' | 'age' }) {
+  let query = db.users.where(x =&gt; x.active.eq(true));
+
+  if (opts.q) query = query.where(x =&gt; x.name.contains(opts.q!));
+  if (opts.minAge) query = query.where(x =&gt; x.age.gte(opts.minAge!));
+
+  const ordered = opts.sort === 'age'
+    ? query.orderByDescending(x =&gt; x.age).thenBy(x =&gt; x.name)
+    : query.orderBy(x =&gt; x.name);
+
+  return ordered.select(x =&gt; ({ id: x.id, name: x.name, age: x.age }));
+}
+
+const page = await search(db, { q: 'am', sort: 'age' }).toPage(1, 20);</code></pre>
+      <p>Scalar aggregates are query <em>terminals</em>, not part of the predicate — they run over the whole filtered set:</p>
+      <pre><code class="language-ts">const paid = db.orders.where(x =&gt; x.status.eq('paid'));
+const stats = {
+  count: await paid.count(),
+  revenue: await paid.sum(x =&gt; x.total),
+  average: await db.orders.avg(x =&gt; x.total),
+};
+
+// Distinct values: .distinct() composes with toList(), not with a terminal
+// aggregate — count the array rather than chaining .distinct().count().
+const countries = await db.orders.select(x =&gt; ({ country: x.country })).distinct().toList();
+console.log('distinct countries:', countries.length);</code></pre>
+      <div class="callout">Filtering or counting <em>through</em> a to-many navigation from inside <code>where()</code> — <code>x.posts.any(...)</code>, <code>x.posts.count()</code> — records into the IR but isn't lowered to SQL by the shipping generator yet (see the callout under <a href="#querying">Operators</a> above). Reach for a query on the child entity instead, e.g. <code>db.posts.where(x =&gt; x.published.eq(true)).select(x =&gt; ({ authorId: x.authorId })).distinct()</code>.</div>
+
+      <h2 id="recipe-audit">Recipe: Audit trail <a class="anchor" href="#recipe-audit">#</a></h2>
+      <p>Write an audit row for every insert/update/delete, in the <em>same</em> transaction as the change that caused it — by adding to the tracker from inside <code>savingChanges</code>, before the write plan is built:</p>
+      <pre><code class="language-ts">import type { OrmPlugin, SavingContext } from '@ormit/core';
+
+class AuditLog {
+  id!: number;
+  entityName!: string;
+  entityKey!: string;
+  action!: 'Added' | 'Modified' | 'Deleted';
+  changedBy!: string;
+  changedAt!: Date;
+}
+// m.entity(AuditLog, e =&gt; e.toTable('audit_logs').hasKey('id')); — register it like any entity
+
+function auditTrail(currentUser: () =&gt; string): OrmPlugin {
+  return {
+    name: 'audit-trail',
+    interceptors: {
+      savingChanges(ctx: SavingContext) {
+        for (const entry of ctx.entries) {
+          if (entry.entityName === 'AuditLog' || entry.state === 'Unchanged') continue;
+          const key = String((entry.entity as { id?: unknown }).id ?? '');
+          const log = Object.assign(new AuditLog(), {
+            entityName: entry.entityName,
+            entityKey: key,
+            action: entry.state,
+            changedBy: currentUser(),
+            changedAt: new Date(),
+          });
+          ctx.tracker.track(log, 'AuditLog', 'Added');  // joins THIS saveChanges' write plan
+        }
+      },
+    },
+  };
+}
+
+const db = new AppDb({ engine, plugins: [auditTrail(() =&gt; currentUser().id)] });
+
+db.users.add(user);
+await db.saveChanges();   // writes `users` and one `audit_logs` row — atomically, one transaction</code></pre>
+      <div class="callout"><code>SavingContext.tracker</code> is the same <code>ChangeTracker</code> the DbContext itself uses — anything you <code>.track()</code> onto it here is picked up by the same <code>planSave()</code> call, topo-sorted and executed alongside your own changes. No second <code>saveChanges()</code>, no separate transaction.</div>
+
+      <h2 id="recipe-evolve">Recipe: Schema evolution <a class="anchor" href="#recipe-evolve">#</a></h2>
+      <p>The full loop — add a field, regenerate, re-apply, keep the data — is small enough to run in a minute. It's also a complete, runnable example in the repo:
+      <a href="https://github.com/farajshuaib/ormit/tree/main/examples/migration-first">examples/migration-first</a>.</p>
+      <pre><code class="language-bash"># 1. Ship the current model as-is.
+pnpm migrations:add init
+pnpm db:update
+
+# 2. Add a field to the model (e.g. `bio!: string | null;` on User,
+#    configured with `e.property(x =&gt; x.bio).isRequired(false);`).
+
+# 3. Diff against the *committed* snapshot — not the live database.
+pnpm migrations:add "add user bio"
+pnpm db:update            # applies only the new migration; existing rows keep their data
+
+pnpm migrations:list      # applied vs. pending, by id
+pnpm db:script            # print the forward DDL for every registered migration</code></pre>
+      <div class="callout">Commit the emitted file under <code>migrations/</code> together with the updated <code>model.snapshot.json</code> — they're one unit of change. If two branches both edit the snapshot and conflict in git, <code>pnpm migrations:repair</code> (wraps <code>repairSnapshot()</code>) re-derives it deterministically from the model rather than asking you to hand-merge JSON.</div>
 
       <h2 id="ef-core">Coming from EF Core <a class="anchor" href="#ef-core">#</a></h2>
       <table>

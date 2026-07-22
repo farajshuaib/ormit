@@ -1,0 +1,194 @@
+{
+  "entities": [
+    {
+      "discriminator": null,
+      "indexes": [],
+      "key": [
+        "id"
+      ],
+      "name": "Post",
+      "navigations": [
+        {
+          "collection": false,
+          "deleteBehavior": "cascade",
+          "foreignKey": [
+            "authorId"
+          ],
+          "inverse": "posts",
+          "joinEntity": null,
+          "name": "author",
+          "owned": false,
+          "principalKey": [
+            "id"
+          ],
+          "target": "User"
+        }
+      ],
+      "owned": false,
+      "properties": [
+        {
+          "column": "authorId",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "authorId",
+          "nullable": false,
+          "type": "number",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "body",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "body",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "createdAt",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": "CURRENT_TIMESTAMP",
+          "maxLength": null,
+          "name": "createdAt",
+          "nullable": false,
+          "type": "Date",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "id",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "id",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "onAdd"
+        },
+        {
+          "column": "title",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 200,
+          "name": "title",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        }
+      ],
+      "queryFilter": null,
+      "schema": null,
+      "seedData": [],
+      "table": "posts"
+    },
+    {
+      "discriminator": null,
+      "indexes": [
+        {
+          "name": "ix_users_email",
+          "properties": [
+            "email"
+          ],
+          "unique": true
+        }
+      ],
+      "key": [
+        "id"
+      ],
+      "name": "User",
+      "navigations": [
+        {
+          "collection": true,
+          "deleteBehavior": "cascade",
+          "foreignKey": [
+            "authorId"
+          ],
+          "inverse": "author",
+          "joinEntity": null,
+          "name": "posts",
+          "owned": false,
+          "principalKey": [
+            "id"
+          ],
+          "target": "Post"
+        }
+      ],
+      "owned": false,
+      "properties": [
+        {
+          "column": "bio",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "bio",
+          "nullable": true,
+          "type": "unknown",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "email",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 200,
+          "name": "email",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        },
+        {
+          "column": "id",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": null,
+          "name": "id",
+          "nullable": false,
+          "type": "unknown",
+          "valueGenerated": "onAdd"
+        },
+        {
+          "column": "name",
+          "comment": null,
+          "concurrencyToken": false,
+          "conversion": null,
+          "defaultValue": null,
+          "defaultValueSql": null,
+          "maxLength": 120,
+          "name": "name",
+          "nullable": false,
+          "type": "string",
+          "valueGenerated": "never"
+        }
+      ],
+      "queryFilter": null,
+      "schema": null,
+      "seedData": [],
+      "table": "users"
+    }
+  ],
+  "version": 1
+}

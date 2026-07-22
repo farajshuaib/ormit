@@ -60,6 +60,10 @@ packages/
   testing/         @ormit/testing      InMemoryEngine (real query semantics, no DB)
 ```
 
+`examples/*` is a separate, non-publishable workspace root (`pnpm-workspace.yaml`) for
+runnable demo apps — e.g. `examples/migration-first` — kept out of `packages/` so
+`scripts/check-deps.mjs` and the `pnpm build` package list never need to know about them.
+
 ## Architecture: the two seams
 
 Everything hinges on two interfaces in `core/src/contracts/engine.ts`:

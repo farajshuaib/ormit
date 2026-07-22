@@ -174,6 +174,10 @@ await migrator.down(1);    // revert the last migration
 `@ormit/cli` backs the intended `ormit` verbs (`migrations add/list`,
 `database update`, `script`, `repair`) over the same primitives.
 
+See [`examples/migration-first`](examples/migration-first) for a complete,
+runnable migration-first workflow — write the model, generate the migration,
+apply it, evolve the schema.
+
 ## Plugins
 
 ```ts

@@ -241,6 +241,7 @@ async; no lazy proxies by default; collection includes are split queries
 - [Guide](docs/guide.md) — quickstart, querying, saving, EF Core mapping
 - [Diagnostics](docs/diagnostics.md) — the `OMT` error catalog
 - [Architecture & ADRs](docs/implementation-plan.md) · [`docs/adr/`](docs/adr)
+- [Releasing](docs/releasing.md) — how to publish `@ormit/*` to npm
 - [`CLAUDE.md`](CLAUDE.md) — contributor/AI technical reference
 
 ## Development

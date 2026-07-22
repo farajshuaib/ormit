@@ -54,7 +54,7 @@ packages/
   dialect-mssql/   @ormit/mssql        node-mssql executor (OUTPUT INSERTED.*)
   plugins/         @ormit/plugins      soft-delete / timestamps / multitenancy (public-surface only)
   migrations/      @ormit/migrations   differ, TS emitter, runner + history, repair
-  cli/             @ormit/cli          command facade (add/list/update/script/repair)
+  cli/             @ormit/cli          command facade + real `ormit` binary (config-driven, dotnet-ef-style)
   decorators/      @ormit/decorators   @entity/@key/@column/@hasOne/@hasMany → ModelBuilder
   adapters/        @ormit/adapters     Express/Fastify/NestJS per-request lifecycle glue
   testing/         @ormit/testing      InMemoryEngine (real query semantics, no DB)

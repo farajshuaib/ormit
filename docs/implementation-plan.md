@@ -278,6 +278,10 @@ Quickstart per dialect (10 min) · Guides (modeling, querying, saving, relations
 - **ADR-004** Lazy loading via explicit `LazyRef`/`LazyCollection`; no sync getters (accepted).
 - **ADR-005** Snapshot change tracking default; POCO entities; opt-in notify mode (accepted).
 - **ADR-006** Model-differ migrations with committed JSON snapshot (accepted).
+- **ADR-007** `ormit` binary resolves an `ormit.config.{ts,mts,js,mjs}` (via a
+  bundled `esbuild`, no `tsx`/`ts-node` required) rather than requiring hand-written
+  wiring per project; `migrations remove` always targets the latest migration only,
+  no reconstructed history (accepted).
 
 ## Appendix B — 1.0-rc Release Checklist
 

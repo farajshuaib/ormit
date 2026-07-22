@@ -3,7 +3,8 @@
  *
  * The commands are exposed as an injectable facade (engine, model, committed
  * snapshot, registered migrations) so they are unit-testable without a real
- * filesystem or process; a thin `bin` wrapper wires the real dependencies.
+ * filesystem or process; `bin.ts` is the real, published `ormit` executable
+ * that wires it to an `ormit.config.ts` and a migrations directory.
  */
 import {
   deserializeSnapshot,
@@ -13,6 +14,7 @@ import {
   type OrmEngine,
 } from '@ormit/core';
 import {
+  diffSnapshots,
   diffWithDown,
   emitMigration,
   EMPTY_SNAPSHOT,
@@ -39,6 +41,13 @@ export interface AddResult {
   readonly destructive: boolean;
 }
 
+export interface RemoveResult {
+  /** The id of the migration that was removed. */
+  readonly id: string;
+  /** The snapshot to commit, re-derived from the current model. */
+  readonly snapshot: string;
+}
+
 export interface Cli {
   /** `ormit migrations add <name>` — diff the model against the committed
    * snapshot and emit a migration (+ the snapshot to commit). */
@@ -53,6 +62,14 @@ export interface Cli {
   repair(): RepairResult;
   /** `ormit script` — the raw forward DDL for the given migrations. */
   script(): string;
+  /** `ormit migrations remove` — delete the most recent migration, provided it
+   * hasn't been applied yet (there is no per-migration snapshot history to
+   * reconstruct, so only the latest migration is ever a safe target — same
+   * restriction EF Core's own `migrations remove` applies). */
+  remove(): Promise<RemoveResult>;
+  /** `ormit migrations has-pending-changes` — true if the model has changed
+   * since the last committed snapshot. */
+  hasPendingChanges(): boolean;
 }
 
 export function createCli(ctx: CliContext): Cli {
@@ -101,5 +118,23 @@ export function createCli(ctx: CliContext): Cli {
       }
       return lines.join('\n') + '\n';
     },
+    async remove() {
+      if (ctx.migrations.length === 0) throw new Error('No migrations to remove.');
+      const sorted = [...ctx.migrations].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const target = sorted[sorted.length - 1]!;
+      const applied = new Set(await migrator().applied());
+      if (applied.has(target.id)) {
+        throw new Error(
+          `Cannot remove '${target.id}': it has already been applied to the database. ` +
+            `Revert it first (database update --down 1), then remove it.`,
+        );
+      }
+      return { id: target.id, snapshot: ctx.model.toJSON() };
+    },
+    hasPendingChanges() {
+      return diffSnapshots(from, ctx.model.data).length > 0;
+    },
   };
 }
+
+export { defineConfig, type OrmitConfig } from './config.js';

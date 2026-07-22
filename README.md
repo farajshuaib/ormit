@@ -171,8 +171,10 @@ await migrator.up();       // idempotent — safe to run twice
 await migrator.down(1);    // revert the last migration
 ```
 
-`@ormit/cli` backs the intended `ormit` verbs (`migrations add/list`,
-`database update`, `script`, `repair`) over the same primitives.
+`@ormit/cli` installs a real `ormit` binary over the same primitives — describe
+your engine and model in an `ormit.config.ts`, then run `ormit migrations
+add/list/remove/repair/has-pending-changes` and `ormit database update` directly,
+the way `dotnet ef` works against an EF Core `DbContext`.
 
 See [`examples/migration-first`](examples/migration-first) for a complete,
 runnable migration-first workflow — write the model, generate the migration,

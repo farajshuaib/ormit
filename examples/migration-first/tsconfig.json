@@ -5,8 +5,7 @@
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false,
-    "noEmit": true,
-    "rootDir": "src"
+    "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src", "ormit.config.ts"]
 }

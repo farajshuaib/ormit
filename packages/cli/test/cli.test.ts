@@ -64,4 +64,43 @@ describe('CLI facade', () => {
     expect(sql).toContain('create table "widgets"');
     expect(sql).toContain('0001_init');
   });
+
+  it('remove() refuses when there are no migrations', async () => {
+    const cli = createCli({ engine: new SqliteEngine(), model: model(), migrations: [] });
+    await expect(cli.remove()).rejects.toThrow(/no migrations to remove/i);
+  });
+
+  it('remove() refuses when the most recent migration is already applied', async () => {
+    const engine = new SqliteEngine(':memory:');
+    const { up, down } = diffWithDown(EMPTY_SNAPSHOT, snapshotData(model()));
+    const migrations: Migration[] = [{ id: '0001_init', up, down }];
+    const cli = createCli({ engine, model: model(), migrations });
+    await cli.update();
+    await expect(cli.remove()).rejects.toThrow(/already been applied/i);
+    engine.close();
+  });
+
+  it('remove() succeeds for an unapplied migration and returns the current snapshot', async () => {
+    const engine = new SqliteEngine(':memory:');
+    const { up, down } = diffWithDown(EMPTY_SNAPSHOT, snapshotData(model()));
+    const migrations: Migration[] = [{ id: '0001_init', up, down }];
+    const cli = createCli({ engine, model: model(), migrations });
+    const result = await cli.remove();
+    expect(result.id).toBe('0001_init');
+    expect(result.snapshot).toBe(model().toJSON());
+    engine.close();
+  });
+
+  it('hasPendingChanges() reflects the diff against the committed snapshot', () => {
+    const upToDate = createCli({
+      engine: new SqliteEngine(),
+      model: model(),
+      committedSnapshot: model().toJSON(),
+      migrations: [],
+    });
+    expect(upToDate.hasPendingChanges()).toBe(false);
+
+    const noCommittedSnapshot = createCli({ engine: new SqliteEngine(), model: model(), migrations: [] });
+    expect(noCommittedSnapshot.hasPendingChanges()).toBe(true);
+  });
 });

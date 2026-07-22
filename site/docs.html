@@ -446,7 +446,31 @@ if (changed) writeFileSync('model.snapshot.json', snapshot);  // resolved determ
       <div class="callout">SQLite migrations run in a transaction; MySQL commits DDL implicitly, so its migrations aren't atomic. Every operation set carries an auto-generated inverse, so <code>down()</code> always exists.</div>
 
       <h2 id="cli">CLI <a class="anchor" href="#cli">#</a></h2>
-      <p><code>@ormit/cli</code> is the programmable core behind the <code>ormit</code> command. Inject your engine, model, committed snapshot, and known migrations, then call the verbs — it's fully unit-testable without a real filesystem or process:</p>
+      <p><code>@ormit/cli</code> installs a real <code>ormit</code> binary — the same ergonomics as <code>dotnet ef</code> against an EF Core <code>DbContext</code>. Describe your engine and model once in an <code>ormit.config.ts</code>, then run the verbs directly from any directory that has one:</p>
+      <pre><code class="language-ts">// ormit.config.ts
+import { defineConfig } from '@ormit/cli';
+import { SqliteEngine } from '@ormit/sqlite';
+import { defineModel } from './src/model.js';
+
+export default defineConfig({
+  engine: () =&gt; new SqliteEngine('app.db'),   // factory — only called when a command runs
+  model: defineModel,                          // the same (m: ModelBuilder) =&gt; void your DbContext uses
+  migrationsDir: './migrations',               // optional, default './migrations'
+  snapshotPath: './model.snapshot.json',       // optional, default './model.snapshot.json'
+});</code></pre>
+      <p><code>ormit.config.ts</code>/<code>.mts</code> is transpiled on the fly (via a bundled <code>esbuild</code>) — no <code>tsx</code>/<code>ts-node</code> registration required. <code>.js</code>/<code>.mjs</code> configs work too, with zero transpilation.</p>
+      <pre><code class="language-bash">ormit migrations add "init"           # diff model vs committed snapshot → migration + snapshot
+ormit migrations list                 # applied vs. pending
+ormit migrations has-pending-changes  # exits non-zero if the model drifted without a migration
+ormit migrations remove               # delete the most recent migration, if it hasn't been applied yet
+ormit migrations repair               # re-derive the snapshot after a merge conflict
+ormit database update                 # apply pending (idempotent)
+ormit database update --down 1        # revert the last migration
+ormit script                          # print the forward DDL</code></pre>
+      <div class="callout"><code>migrations remove</code> mirrors <code>dotnet ef migrations remove</code>'s own rule: it always targets the most recent migration and refuses if it's already applied — there's no per-migration snapshot history to reconstruct from, so removing anything but the latest migration isn't a safe operation to automate. Revert it first with <code>database update --down 1</code>.</div>
+
+      <h3>Wiring it yourself</h3>
+      <p>The binary is a thin, filesystem-touching wrapper around a pure, injectable facade — reach for it directly for custom wiring (a monorepo with multiple contexts, a non-standard migrations layout, …):</p>
       <pre><code class="language-ts">import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createCli } from '@ormit/cli';
 
@@ -469,14 +493,10 @@ await cli.update();                        // `ormit database update`  → ['000
 await cli.revert(1);                       // `ormit database update --down 1`
 const { applied, pending } = await cli.list();  // `ormit migrations list`
 const sql = cli.script();                  // `ormit script` — forward DDL as text
-const { changed } = cli.repair();          // `ormit migrations repair`</code></pre>
-      <p>A thin binary wraps these into the terminal verbs:</p>
-      <pre><code class="language-bash">ormit migrations add "init"     # diff → migration file + snapshot to commit
-ormit migrations list           # applied vs. pending
-ormit database update           # apply pending (idempotent)
-ormit database update --down 1  # revert the last
-ormit script                    # print the forward DDL
-ormit migrations repair         # re-derive the snapshot after a merge conflict</code></pre>
+const { changed } = cli.repair();          // `ormit migrations repair`
+const { id } = await cli.remove();         // `ormit migrations remove` — throws if already applied
+const stale = cli.hasPendingChanges();     // `ormit migrations has-pending-changes`</code></pre>
+      <p>See <a href="https://github.com/farajshuaib/ormit/tree/main/examples/migration-first">examples/migration-first</a> for this whole workflow wired up and runnable end to end.</p>
 
       <h2 id="plugins">Plugins <a class="anchor" href="#plugins">#</a></h2>
       <p>Register plugins on the context. The first-party plugins are built solely on the public <code>OrmPlugin</code> surface — <code>configureModel</code>, <code>normalizerPasses</code>, and lifecycle <code>interceptors</code> — so your own plugins have the same power.</p>

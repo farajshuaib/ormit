@@ -1,6 +1,6 @@
 ---
 name: ormit-migrations
-description: Snapshot-diff migrations in @ormit/migrations and the @ormit/cli facade — the model differ (ModelSnapshot vs ModelSnapshot, never the live DB), TS migration emitter, Migrator runner with history table, snapshot repair/conflict resolution, and the CLI command surface (add/list/update/repair/script). Use when changing migration generation, the history/runner mechanics, or CLI commands.
+description: Snapshot-diff migrations in @ormit/migrations and the @ormit/cli facade + real ormit binary — the model differ (ModelSnapshot vs ModelSnapshot, never the live DB), TS migration emitter, Migrator runner with history table, snapshot repair/conflict resolution, the CLI command surface (add/list/remove/update/repair/script/has-pending-changes), the ormit.config.ts convention, and the esbuild-based ts-loader. Use when changing migration generation, the history/runner mechanics, CLI commands, or the config/migration-loading machinery in bin.ts.
 ---
 
 # Ormit migrations & CLI (ADR-006)
@@ -63,8 +63,10 @@ conflict) doesn't get falsely flagged as drift.
 ## CLI facade — [cli/index.ts](packages/cli/src/index.ts)
 
 `createCli(ctx: CliContext)` — `ctx` bundles `engine, model, committedSnapshot?,
-migrations` so the facade is unit-testable without touching a filesystem/process;
-a separate (not-yet-written-here) `bin` wrapper would supply real deps. Commands:
+migrations` so the facade is **unit-testable without touching a filesystem/process**
+(confirmed by its own test suite, `cli/test/cli.test.ts`, which never writes a
+file). All filesystem I/O — writing migration files, the snapshot, deleting a
+removed migration — happens in `bin.ts`, not here. Commands:
 
 - `add(name)` — diffs `committedSnapshot` (or `EMPTY_SNAPSHOT`) against
   `ctx.model.data`; throws a plain `Error` if there's nothing to migrate
@@ -78,3 +80,49 @@ a separate (not-yet-written-here) `bin` wrapper would supply real deps. Commands
 - `script()` — concatenates the forward DDL SQL for **every registered migration's
   `up`** (not just pending) into one printable script, prefixed per-migration with
   a `-- <id>` comment.
+- `remove()` — **no target-id parameter, always the most recent migration** (sorted
+  by id). Refuses (throws) if that migration is already in `Migrator.applied()`.
+  Returns `{ id, snapshot: ctx.model.toJSON() }` — the snapshot is **re-derived from
+  whatever the current model says**, not reconstructed from history (there is no
+  per-migration snapshot history to replay — only one cumulative
+  `model.snapshot.json` ever exists). This means `remove()` is only correct if the
+  caller already reverted the model change the migration captured; if they didn't,
+  the failure mode is inert (the next `add()` reports "no model changes"), not
+  corruption. Mirrors `dotnet ef migrations remove`'s own restriction to the latest
+  migration.
+- `hasPendingChanges()` — `diffSnapshots(from, ctx.model.data).length > 0`, reusing
+  the `from` snapshot already computed once in `createCli()`'s closure. Powers
+  `ormit migrations has-pending-changes` (a CI-friendly check with a non-zero exit
+  code when there's drift).
+
+## The real binary — [cli/bin.ts](packages/cli/src/bin.ts)
+
+The published `ormit` command (`package.json`'s `bin` field). Resolves an
+`ormit.config.{ts,mts,js,mjs}` (via [load-config.ts](packages/cli/src/load-config.ts),
+searched in `process.cwd()` unless `--config <path>` is given), builds a
+`ModelSnapshot` from the config's `model(m)`, loads every file in
+`migrationsDir` via [load-migrations.ts](packages/cli/src/load-migrations.ts),
+opens the engine via the config's `engine()` factory, and dispatches one of 7
+hand-parsed verb combinations onto `createCli()` — no argv-parsing dependency.
+`engine.close()` is duck-typed (`OrmEngine` itself has no `close()`; it's
+dialect-specific — sync for SQLite, async pool-drain for Postgres/MySQL/MSSQL).
+
+**[ts-loader.ts](packages/cli/src/ts-loader.ts)** is what lets `.ts` config and
+migration files load with zero `tsx`/`ts-node` setup: `.ts`/`.mts` files are
+transpiled with `esbuild` (bundled for the config, since it may import local
+model/engine code; single-file-transformed for migrations, since their only
+import — `import type { MigrationOperation }` — is fully erased) and the
+transpiled output is written to a **temp file colocated in the same directory
+as the source file**, then dynamically `import()`-ed and deleted in a `finally`.
+This colocation is load-bearing, not incidental — two things break otherwise:
+bare-specifier resolution (`import { SqliteEngine } from '@ormit/sqlite'` inside
+the bundled output resolves by Node walking up `node_modules` from the
+*importing file's own path* — a file written to `os.tmpdir()` or some other
+shared location outside the project would never find them), and any
+`import.meta.url`-based path logic inside the user's own config (the standard
+`dirname(fileURLToPath(import.meta.url))` idiom only reports the *running*
+file's location — relocating it anywhere other than right next to the original
+silently breaks that, even if the new location still happens to be inside the
+project tree). Both failure modes were caught empirically while building this
+(see `packages/cli/test/loaders.test.ts`'s fixtures) before being caught by any
+type checker.

@@ -308,8 +308,50 @@ second migration that adds a column to prove schema evolution preserves data.
 
 ## CLI
 
-`@ormit/cli` is the injectable core behind the `ormit` command — pass your engine,
-model, committed snapshot, and known migrations, then call the verbs:
+`@ormit/cli` installs a real `ormit` binary — the same ergonomics as `dotnet ef`
+against an EF Core `DbContext`: describe your engine and model once in an
+`ormit.config.ts`, then run the verbs directly, from any directory that has one.
+
+```ts
+// ormit.config.ts
+import { defineConfig } from '@ormit/cli';
+import { SqliteEngine } from '@ormit/sqlite';
+import { defineModel } from './src/model.js';
+
+export default defineConfig({
+  engine: () => new SqliteEngine('app.db'),   // factory — only called when a command runs
+  model: defineModel,                          // the same (m: ModelBuilder) => void your DbContext uses
+  migrationsDir: './migrations',               // optional, default './migrations'
+  snapshotPath: './model.snapshot.json',       // optional, default './model.snapshot.json'
+});
+```
+
+`ormit.config.ts`/`.mts` is transpiled on the fly (via a bundled `esbuild`) —
+no `tsx`/`ts-node` registration required. `.js`/`.mjs` configs work too, with
+zero transpilation.
+
+```bash
+ormit migrations add "init"           # diff model vs committed snapshot → migration + snapshot
+ormit migrations list                 # applied vs. pending
+ormit migrations has-pending-changes  # exits non-zero if the model drifted without a migration
+ormit migrations remove               # delete the most recent migration, if it hasn't been applied yet
+ormit migrations repair               # re-derive the snapshot after a merge conflict
+ormit database update                 # apply pending (idempotent)
+ormit database update --down 1        # revert the last migration
+ormit script                          # print the forward DDL
+```
+
+`migrations remove` mirrors `dotnet ef migrations remove`'s own rule: it always
+targets the most recent migration and refuses if it's already applied (there's
+no per-migration snapshot history to reconstruct from, so removing anything but
+the latest migration isn't a safe operation to automate) — revert it first with
+`database update --down 1`.
+
+### Wiring it yourself
+
+The binary is a thin, filesystem-touching wrapper around a pure, injectable
+facade — reach for it directly if you need custom wiring (a monorepo with
+multiple contexts, a non-standard migrations layout, etc.):
 
 ```ts
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -332,18 +374,12 @@ await cli.revert(1);                       // roll back the last
 const { applied, pending } = await cli.list();
 const sql = cli.script();                  // forward DDL as text
 cli.repair();                              // re-derive the snapshot
+const { id } = await cli.remove();         // delete the most recent migration (throws if applied)
+const stale = cli.hasPendingChanges();     // true if the model differs from the committed snapshot
 ```
 
-A thin binary wraps these into terminal verbs:
-
-```bash
-ormit migrations add "init"     # diff model vs committed snapshot → migration + snapshot
-ormit migrations list           # applied vs. pending
-ormit database update           # apply pending (idempotent)
-ormit database update --down 1  # revert the last migration
-ormit script                    # print the forward DDL
-ormit migrations repair         # re-derive the snapshot after a merge conflict
-```
+See [`examples/migration-first`](../examples/migration-first) for this whole
+workflow wired up and runnable end to end.
 
 ## Coming from EF Core
 

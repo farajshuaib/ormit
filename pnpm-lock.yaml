@@ -66,6 +66,9 @@ importers:
       '@ormit/migrations':
         specifier: workspace:*
         version: link:../migrations
+      esbuild:
+        specifier: 0.21.5
+        version: 0.21.5
 
   packages/core: {}
 

@@ -75,32 +75,32 @@ await db.saveChanges(); // atomic · key write-back</code></pre>
           <div class="card">
             <div class="ic">◇</div>
             <h3>Typed, safe queries</h3>
-            <p>A Proxy expression recorder captures <code>x.age.gt(18)</code> into an IR — no <code>toString()</code> parsing, minification-safe. Illegal operators don't compile.</p>
+            <p>Every query is checked at compile time. Write something that doesn't make sense, and it simply won't build — no runtime surprises.</p>
           </div>
           <div class="card">
             <div class="ic">⟳</div>
-            <h3>Change tracking &amp; UoW</h3>
-            <p>A snapshot-diffing identity map, atomic <code>saveChanges()</code> with FK ordering, optimistic concurrency, and ambient transactions.</p>
+            <h3>Change tracking &amp; saving</h3>
+            <p>Track entities, mutate them, call <code>saveChanges()</code>. Ormit figures out what changed, saves it in the right order, and catches conflicting updates.</p>
           </div>
           <div class="card">
             <div class="ic">⇄</div>
             <h3>Relationships &amp; loading</h3>
-            <p><code>Include</code>/<code>ThenInclude</code> as split queries (no cartesian explosion), plus explicit and opt-in lazy loading.</p>
+            <p>Load related data with <code>include</code>/<code>thenInclude</code>, without the performance trap of one giant joined query — or load it on demand instead.</p>
           </div>
           <div class="card">
             <div class="ic">△</div>
             <h3>Snapshot migrations</h3>
-            <p>A differ compares your model to the last committed snapshot — never the live DB — and emits reversible, mergeable migrations.</p>
+            <p>Migrations come from comparing your model to your last commit — never your live database — so they're predictable and easy to review in a PR.</p>
           </div>
           <div class="card">
             <div class="ic">◈</div>
             <h3>Plugins</h3>
-            <p>Soft-delete, timestamps, and multitenancy ship first-party, built entirely on the same public plugin surface you'd use.</p>
+            <p>Soft-delete, timestamps, and multi-tenancy ship built in — using the exact same plugin API you'd use to write your own.</p>
           </div>
           <div class="card">
             <div class="ic">⚡</div>
             <h3>Kysely engine, hidden</h3>
-            <p>Deterministic, parameterized SQL per dialect. The engine is a swappable seam — it never leaks into your types.</p>
+            <p>Every dialect produces clean, parameterized SQL. The engine underneath is fully swappable — it never leaks into your code.</p>
           </div>
         </div>
       </div>
@@ -110,7 +110,7 @@ await db.saveChanges(); // atomic · key write-back</code></pre>
       <div class="wrap split">
         <div>
           <h3>Write LINQ, get SQL</h3>
-          <p>Compose immutable queries with a fluent, fully-typed API. Every operator maps to real SQL; anything untranslatable throws at build time, never silently.</p>
+          <p>Compose queries with a fluent, fully-typed API. If something can't translate to SQL, you'll know right away — not after it ships.</p>
           <ul>
             <li><strong>Operators</strong> — eq/in/between, startsWith/contains/like/toLower/toUpper.</li>
             <li><strong>Terminals</strong> — toList, first, single, count, sum/avg/min/max, toPage.</li>
@@ -132,11 +132,11 @@ await db.saveChanges(); // atomic · key write-back</code></pre>
       <div class="wrap split alt">
         <div>
           <h3>Save like a Unit of Work</h3>
-          <p>Track POCO entities, mutate them, and persist in one atomic call. Ormit detects changes, orders inserts and deletes by the FK graph, writes generated keys back, and enforces concurrency tokens.</p>
+          <p>Track plain classes, mutate them, and persist everything in one call. Ormit figures out what changed, saves it in the right order, and enforces concurrency checks.</p>
           <ul>
-            <li><strong>Identity map</strong> — <code>find()</code> and query results dedupe to one instance.</li>
-            <li><strong>Concurrency</strong> — a stale update throws <code>ConcurrencyError</code>.</li>
-            <li><strong>Transactions</strong> — <code>database.transaction()</code> is ambient (AsyncLocalStorage).</li>
+            <li><strong>No duplicates</strong> — <code>find()</code> and query results return the same tracked instance.</li>
+            <li><strong>Concurrency</strong> — a stale update throws <code>ConcurrencyError</code>, instead of silently overwriting.</li>
+            <li><strong>Transactions</strong> — <code>database.transaction()</code> wraps multiple saves in one atomic unit.</li>
           </ul>
         </div>
         <div class="window">

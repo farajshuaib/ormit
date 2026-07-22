@@ -147,10 +147,10 @@ const db = new AppDb({ engine });</code></pre></div>
 await db.saveChanges();          // INSERT — faraj.id is written back
 
 const adults = await db.users.where(x =&gt; x.age.gte(18)).toList();</code></pre>
-      <div class="callout">Only the <strong>engine import + construction</strong> and your <strong>DDL dialect</strong> differ between databases. The <code>DbContext</code>, model, queries, and <code>saveChanges()</code> are portable — Ormit adapts the SQL (<code>RETURNING</code> vs <code>OUTPUT</code> vs <code>insertId</code>, <code>LIMIT/OFFSET</code> vs <code>TOP</code>/<code>OFFSET…FETCH</code>) for you.</div>
+      <div class="callout">Only the engine setup differs between databases. Your model, queries, and <code>saveChanges()</code> stay exactly the same — Ormit handles the SQL differences for you.</div>
 
       <h2 id="modeling">Defining a model <a class="anchor" href="#modeling">#</a></h2>
-      <p>Entities are plain classes (POCOs). Configure them fluently in <code>onModelCreating</code>. Precedence is <strong>convention &lt; decorator &lt; fluent</strong> — you only configure what conventions can't infer.</p>
+      <p>Entities are plain classes. Configure them in <code>onModelCreating</code> — you only need to specify what Ormit can't work out on its own.</p>
       <pre><code class="language-ts">m.entity(Post, e =&gt; {
   e.toTable('posts', 'blog');                        // table + optional schema
   e.hasKey('id');                                    // or composite: hasKey('a', 'b')
@@ -201,7 +201,7 @@ e.hasOne(Team, x =&gt; x.team).withMany().hasForeignKey('teamId').isRequired(fal
 // Many-to-many (implicit join, or an explicit join entity with payload).
 e.hasMany(Role, x =&gt; x.roles).withMany(r =&gt; r.users);
 e.hasMany(Role, x =&gt; x.roles).withMany(r =&gt; r.users, UserRole); // usingEntity</code></pre>
-      <div class="callout">The model finalizes once per context class into an immutable, JSON-serializable <strong>ModelSnapshot</strong> (sorted keys, byte-stable) that the migrations differ consumes. Invalid models throw eagerly with an actionable <code>OMT12xx</code> code — see <a href="#diagnostics">Diagnostics</a>.</div>
+      <div class="callout">If something's wrong with your model — a missing key, a bad foreign key — Ormit tells you right away, with a clear error code. See <a href="#diagnostics">Diagnostics</a>.</div>
 
       <h3>Decorators</h3>
       <p>Prefer decorators? <code>@ormit/decorators</code> replays into the same builder — call <code>applyDecorators(model, [...])</code> at the top of <code>onModelCreating</code>, then override fluently if needed:</p>
@@ -229,11 +229,9 @@ class AppDb extends DbContext {
 }</code></pre>
 
       <h3>Value converters</h3>
-      <p><code>hasConversion('name')</code> maps a property to a column through a named converter,
-      applied at the boundary: <code>toProvider</code> on write and in <code>where</code> filters,
-      <code>fromProvider</code> when materializing. The <em>name</em> is all that's stored in the
-      snapshot, so migrations stay byte-stable; the functions are supplied at runtime via
-      <code>DbContextOptions.converters</code>.</p>
+      <p>Need to store a property as something different than its model type — an array as JSON
+      text, an enum as a number? Give the property a converter name in the model, then supply the
+      actual conversion functions when you create the <code>DbContext</code>:</p>
       <pre><code class="language-ts">import { jsonConverter, booleanNumberConverter, isoDateConverter, defineConverter } from '@ormit/core';
 
 class Account { id!: number; tags!: string[]; createdAt!: Date; premium!: boolean; role!: Role; }
@@ -266,12 +264,10 @@ const db = new AppDb({
 account.tags = ['a', 'b'];
 await db.saveChanges();                                  // stores '["a","b"]'
 await db.accounts.where(x =&gt; x.premium.eq(true)).toList(); // compares against 1</code></pre>
-      <div class="callout"><code>null</code> passes through untouched. A property naming a converter that isn't
-      registered throws at context construction. The column's <em>stored</em> type is the provider type —
-      model it accordingly (e.g. <code>hasType</code> / the migration column type).</div>
+      <div class="callout"><code>null</code> always passes through untouched. If a property names a converter you forgot to register, Ormit tells you immediately when you create the context — not later, when you happen to touch that property.</div>
 
       <h2 id="querying">Querying <a class="anchor" href="#querying">#</a></h2>
-      <p>Every <code>Queryable</code> is immutable — each call returns a new query. The lambda runs once at build time against a typed Proxy that records an IR.</p>
+      <p>Every query is immutable — each method call returns a new query, so you can build on one without changing the original.</p>
       <pre><code class="language-ts">const rows = await db.users
   .where(x =&gt; x.age.between(18, 65).and(x.email.isNotNull()))
   .orderByDescending(x =&gt; x.createdAt)
@@ -285,7 +281,7 @@ await db.accounts.where(x =&gt; x.premium.eq(true)).toList(); // compares agains
         <tr><td>Ordered</td><td><code>gt</code> <code>gte</code> <code>lt</code> <code>lte</code> <code>between</code></td></tr>
         <tr><td>String</td><td><code>startsWith</code> <code>endsWith</code> <code>contains</code> <code>like</code> <code>toLower</code> <code>toUpper</code></td></tr>
       </table>
-      <div class="callout"><code>any(pred?)</code>/<code>all(pred)</code>/<code>count()</code> on a to-many navigation record into the expression tree today, but the shipping SQL generator doesn't yet lower that into a correlated subquery — calling one throws a clear <code>TranslationError</code> at query-compile time rather than silently misbehaving. Track this on the project's issue tracker before relying on it.</div>
+      <div class="callout"><code>any()</code>, <code>all()</code>, and <code>count()</code> on a related collection type-check today, but aren't runnable yet — calling one throws a clear error rather than returning the wrong data. See the <a href="#recipe-queries">Rich queries</a> recipe for a workaround.</div>
       <h3>Shaping</h3>
       <p>Chain <code>where</code> (ANDed), <code>orderBy</code>/<code>orderByDescending</code> then
       <code>thenBy</code>/<code>thenByDescending</code> for secondary sort keys,
@@ -302,12 +298,12 @@ await db.accounts.where(x =&gt; x.premium.eq(true)).toList(); // compares agains
       <pre><code class="language-ts">// Parameterized — interpolations are always bound, never string-concatenated.
 const found = await db.users.fromSql`SELECT * FROM users WHERE name = ${name}`.toList();
 
-const readonly = await db.users.asNoTracking().toList();     // skip identity map
+const readonly = await db.users.asNoTracking().toList();     // read-only, not tracked
 const all = await db.users.ignoreQueryFilters().toList();    // bypass global filters</code></pre>
 
       <h2 id="saving">Saving &amp; change tracking <a class="anchor" href="#saving">#</a></h2>
-      <p>Track entities with <code>add</code>/<code>attach</code>/<code>remove</code>, then persist atomically. Ormit diffs snapshots to find changes, topo-sorts by the FK graph (parents before children on insert, the reverse on delete), and writes generated keys back.</p>
-      <pre><code class="language-ts">const user = await db.users.find(1);   // identity map first, then a keyed query
+      <p>Track entities with <code>add</code>, <code>attach</code>, or <code>remove</code>, then call <code>saveChanges()</code> to persist everything at once. Ormit figures out what changed, saves things in the right order, and fills in generated ids for you.</p>
+      <pre><code class="language-ts">const user = await db.users.find(1);   // already-tracked instance, or a fresh query
 user!.name = 'Renamed';                // tracked — only changed columns update
 db.users.remove(other);
 const affected = await db.saveChanges();
@@ -373,7 +369,7 @@ const users = await db.users
       Removing a principal removes its dependents automatically.</div>
 
       <h2 id="migrations">Migrations <a class="anchor" href="#migrations">#</a></h2>
-      <p>Migrations come from diffing your model snapshot against the last <em>committed</em> one — never from introspecting the live database (ADR-006). That keeps them deterministic and mergeable. The flow: <strong>build the model → diff → emit a migration file &amp; commit the new snapshot → run the migrator.</strong></p>
+      <p>Ormit creates migrations by comparing your model to the version you last committed — it never inspects the live database. That keeps migrations predictable and easy to merge in git. The easiest way to work with them is the <a href="#cli"><code>ormit</code> CLI</a> below; here's what it does under the hood.</p>
 
       <p>Share one model definition between your context and the migration tooling:</p>
       <pre><code class="language-ts">import { ModelBuilder, ModelSnapshot } from '@ormit/core';
@@ -391,7 +387,7 @@ class AppDb extends DbContext {
   protected onModelCreating(m: ModelBuilder) { defineModel(m); }
 }
 
-// …and so does the tooling — build an immutable, byte-stable snapshot.
+// …and so does the tooling — build a snapshot of the model.
 const mb = new ModelBuilder();
 defineModel(mb);
 const model = ModelSnapshot.build(mb);</code></pre>
@@ -467,10 +463,10 @@ ormit migrations repair               # re-derive the snapshot after a merge con
 ormit database update                 # apply pending (idempotent)
 ormit database update --down 1        # revert the last migration
 ormit script                          # print the forward DDL</code></pre>
-      <div class="callout"><code>migrations remove</code> mirrors <code>dotnet ef migrations remove</code>'s own rule: it always targets the most recent migration and refuses if it's already applied — there's no per-migration snapshot history to reconstruct from, so removing anything but the latest migration isn't a safe operation to automate. Revert it first with <code>database update --down 1</code>.</div>
+      <div class="callout"><code>migrations remove</code> (like <code>dotnet ef migrations remove</code>) only ever removes the most recent migration, and refuses if it's already applied — revert it first with <code>database update --down 1</code>.</div>
 
       <h3>Wiring it yourself</h3>
-      <p>The binary is a thin, filesystem-touching wrapper around a pure, injectable facade — reach for it directly for custom wiring (a monorepo with multiple contexts, a non-standard migrations layout, …):</p>
+      <p>Need custom wiring — a monorepo with multiple contexts, a non-standard migrations folder? Call the same functions the binary uses, directly:</p>
       <pre><code class="language-ts">import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createCli } from '@ormit/cli';
 
@@ -499,7 +495,7 @@ const stale = cli.hasPendingChanges();     // `ormit migrations has-pending-chan
       <p>See <a href="https://github.com/farajshuaib/ormit/tree/main/examples/migration-first">examples/migration-first</a> for this whole workflow wired up and runnable end to end.</p>
 
       <h2 id="plugins">Plugins <a class="anchor" href="#plugins">#</a></h2>
-      <p>Register plugins on the context. The first-party plugins are built solely on the public <code>OrmPlugin</code> surface — <code>configureModel</code>, <code>normalizerPasses</code>, and lifecycle <code>interceptors</code> — so your own plugins have the same power.</p>
+      <p>Register plugins on the context to add cross-cutting behavior — the built-in ones below use the exact same public API you would, so writing your own is just as capable.</p>
       <pre><code class="language-ts">import { softDelete, timestamps, multitenancy } from '@ormit/plugins';
 
 const db = new AppDb({
@@ -512,7 +508,7 @@ const db = new AppDb({
 });</code></pre>
 
       <h3>Writing your own</h3>
-      <p>A plugin is just an object on the <code>OrmPlugin</code> surface. <code>configureModel</code> shapes the model, <code>normalizerPasses</code> rewrite queries (IR → IR), and <code>interceptors</code> hook the save/command lifecycle:</p>
+      <p>A plugin is a plain object with a few optional hooks: <code>configureModel</code> to adjust the model, <code>normalizerPasses</code> to rewrite queries, and <code>interceptors</code> to hook into saving:</p>
       <pre><code class="language-ts">import type { OrmPlugin } from '@ormit/core';
 
 function auditColumns(): OrmPlugin {
@@ -602,10 +598,10 @@ db.users.add(Object.assign(new User(), { name: 'Nour', age: 28 }));
 await db.saveChanges();
 expect(engine.rows('users')).toHaveLength(3);
 expect(engine.log.length).toBeGreaterThan(0);   // every compiled command is logged</code></pre>
-      <div class="callout">The in-memory engine is the same seam the dialects implement, so your queries and change tracking behave identically — it's ideal for fast unit tests, with Testcontainers reserved for dialect compatibility.</div>
+      <div class="callout">The in-memory engine behaves just like a real database, so your tests stay accurate. Use it for everyday unit tests, and save real databases for compatibility testing.</div>
 
       <h2 id="recipe-multitenant">Recipe: Multi-tenant SaaS <a class="anchor" href="#recipe-multitenant">#</a></h2>
-      <p>Scope every table by a tenant discriminator column, resolved <em>per-operation</em> from <code>AsyncLocalStorage</code> — the tenant id is never cached on the plugin instance, so one pooled context safely serves requests for different tenants.</p>
+      <p>Add a tenant column to your tables, and let Ormit filter every query and stamp every insert automatically — based on whichever tenant is active for the current request.</p>
       <pre><code class="language-ts">import { AsyncLocalStorage } from 'node:async_hooks';
 import { multitenancy } from '@ormit/plugins';
 
@@ -630,7 +626,7 @@ app.post('/projects', async (req, res) =&gt; {
   await db.saveChanges();                  // tenantId stamped on the insert automatically
   res.sendStatus(201);
 });</code></pre>
-      <div class="callout">Scope only some entities with <code>multitenancy({ tenant, entities: [Project, Invoice] })</code> — anything not listed is left untouched. Pair this with <code>@ormit/adapters</code>' <code>ormitExpress()</code> for the per-request context itself (see <a href="#adapters">Web adapters</a>).</div>
+      <div class="callout">Only want this on some tables? Pass <code>entities: [Project, Invoice]</code> — anything not listed is left alone. Pair this with <code>ormitExpress()</code> from <a href="#adapters">Web adapters</a> for the per-request context itself.</div>
 
       <h2 id="recipe-soft-delete">Recipe: Soft delete &amp; restore <a class="anchor" href="#recipe-soft-delete">#</a></h2>
       <p>Model the flag column normally, then let the plugin rewrite deletes into updates and filter every read:</p>
@@ -651,7 +647,7 @@ const everything = await db.posts.ignoreQueryFilters().toList();  // bypass the 
       <pre><code class="language-ts">const trashed = await db.posts.ignoreQueryFilters().where(x =&gt; x.id.eq(postId)).single();
 trashed.isDeleted = false;
 await db.saveChanges();                    // UPDATE posts SET "isDeleted" = false</code></pre>
-      <div class="callout">Scope with <code>softDelete({ entities: [Post, Comment] })</code> — omit it and every entity declared in <code>onModelCreating</code> gets the filter. Pass <code>column</code> to use something other than <code>isDeleted</code>.</div>
+      <div class="callout">Only want this on some tables? Pass <code>softDelete({ entities: [Post, Comment] })</code> — otherwise every entity gets it. Use <code>column</code> to name the flag something other than <code>isDeleted</code>.</div>
 
       <h2 id="recipe-transactions">Recipe: Transactions &amp; concurrency <a class="anchor" href="#recipe-transactions">#</a></h2>
       <p>Wrap multiple saves in one atomic unit, and let a concurrency token protect against a stale write clobbering someone else's change.</p>
@@ -709,10 +705,10 @@ const stats = {
 // aggregate — count the array rather than chaining .distinct().count().
 const countries = await db.orders.select(x =&gt; ({ country: x.country })).distinct().toList();
 console.log('distinct countries:', countries.length);</code></pre>
-      <div class="callout">Filtering or counting <em>through</em> a to-many navigation from inside <code>where()</code> — <code>x.posts.any(...)</code>, <code>x.posts.count()</code> — records into the IR but isn't lowered to SQL by the shipping generator yet (see the callout under <a href="#querying">Operators</a> above). Reach for a query on the child entity instead, e.g. <code>db.posts.where(x =&gt; x.published.eq(true)).select(x =&gt; ({ authorId: x.authorId })).distinct()</code>.</div>
+      <div class="callout">Can't filter through a related collection inside <code>where()</code> yet (see the note under <a href="#querying">Operators</a>) — query the related table directly instead, e.g. <code>db.posts.where(x =&gt; x.published.eq(true)).select(x =&gt; ({ authorId: x.authorId })).distinct()</code>.</div>
 
       <h2 id="recipe-audit">Recipe: Audit trail <a class="anchor" href="#recipe-audit">#</a></h2>
-      <p>Write an audit row for every insert/update/delete, in the <em>same</em> transaction as the change that caused it — by adding to the tracker from inside <code>savingChanges</code>, before the write plan is built:</p>
+      <p>Log every insert, update, and delete to its own table — in the same transaction as the change itself, so the log can never drift out of sync:</p>
       <pre><code class="language-ts">import type { OrmPlugin, SavingContext } from '@ormit/core';
 
 class AuditLog {
@@ -751,7 +747,7 @@ const db = new AppDb({ engine, plugins: [auditTrail(() =&gt; currentUser().id)] 
 
 db.users.add(user);
 await db.saveChanges();   // writes `users` and one `audit_logs` row — atomically, one transaction</code></pre>
-      <div class="callout"><code>SavingContext.tracker</code> is the same <code>ChangeTracker</code> the DbContext itself uses — anything you <code>.track()</code> onto it here is picked up by the same <code>planSave()</code> call, topo-sorted and executed alongside your own changes. No second <code>saveChanges()</code>, no separate transaction.</div>
+      <div class="callout">Because the audit log is tracked inside the same save, it's written in the same transaction as your changes — no second <code>saveChanges()</code>, no risk of the log getting out of sync.</div>
 
       <h2 id="recipe-evolve">Recipe: Schema evolution <a class="anchor" href="#recipe-evolve">#</a></h2>
       <p>The full loop — add a field, regenerate, re-apply, keep the data — is small enough to run in a minute. It's also a complete, runnable example in the repo:
@@ -769,7 +765,7 @@ pnpm db:update            # applies only the new migration; existing rows keep t
 
 pnpm migrations:list      # applied vs. pending, by id
 pnpm db:script            # print the forward DDL for every registered migration</code></pre>
-      <div class="callout">Commit the emitted file under <code>migrations/</code> together with the updated <code>model.snapshot.json</code> — they're one unit of change. If two branches both edit the snapshot and conflict in git, <code>pnpm migrations:repair</code> (wraps <code>repairSnapshot()</code>) re-derives it deterministically from the model rather than asking you to hand-merge JSON.</div>
+      <div class="callout">Commit the new file under <code>migrations/</code> together with the updated <code>model.snapshot.json</code> — they're one unit of change. If two branches both edit the snapshot and conflict in git, <code>pnpm migrations:repair</code> re-derives it from the model — no hand-merging JSON.</div>
 
       <h2 id="ef-core">Coming from EF Core <a class="anchor" href="#ef-core">#</a></h2>
       <table>
@@ -801,13 +797,13 @@ pnpm db:script            # print the forward DDL for every registered migration
       <h2 id="packages">Packages <a class="anchor" href="#packages">#</a></h2>
       <table>
         <tr><th>Package</th><th>Purpose</th></tr>
-        <tr><td><code>@ormit/core</code></td><td>IR, recorder, Queryable + pipeline, DbContext/DbSet, tracking, metadata, contracts</td></tr>
-        <tr><td><code>@ormit/engine-kysely</code></td><td>Lowers IR onto Kysely; SQL + DDL for all four dialects</td></tr>
-        <tr><td><code>@ormit/sqlite · postgres · mysql · mssql</code></td><td>Dialect executors</td></tr>
-        <tr><td><code>@ormit/plugins</code></td><td>soft-delete, timestamps, multitenancy</td></tr>
-        <tr><td><code>@ormit/migrations · cli</code></td><td>Differ, emitter, runner, repair; command facade</td></tr>
-        <tr><td><code>@ormit/decorators · adapters</code></td><td>Decorator model API; Express/Fastify/NestJS glue</td></tr>
-        <tr><td><code>@ormit/testing</code></td><td>In-memory engine with real query semantics</td></tr>
+        <tr><td><code>@ormit/core</code></td><td>The ORM itself — <code>DbContext</code>, <code>DbSet</code>, queries, and change tracking</td></tr>
+        <tr><td><code>@ormit/engine-kysely</code></td><td>Turns Ormit's queries into SQL for each database</td></tr>
+        <tr><td><code>@ormit/sqlite · postgres · mysql · mssql</code></td><td>One package per database</td></tr>
+        <tr><td><code>@ormit/plugins</code></td><td>Soft-delete, timestamps, multi-tenancy</td></tr>
+        <tr><td><code>@ormit/migrations · cli</code></td><td>Migrations and the <code>ormit</code> command-line tool</td></tr>
+        <tr><td><code>@ormit/decorators · adapters</code></td><td>Decorator-based models; Express/Fastify/NestJS integration</td></tr>
+        <tr><td><code>@ormit/testing</code></td><td>An in-memory database for fast unit tests</td></tr>
       </table>
 
       <div class="band" style="margin-top:48px">
